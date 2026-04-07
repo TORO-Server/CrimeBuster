@@ -1,4 +1,12 @@
 name: CrimeBuster
-version: '0.0.0'
+version: '${version}'
 main: marumasa.crimeBuster.CrimeBuster
 api-version: '1.21'
+commands:
+  crime:
+    description: 犯罪係数を確認・管理します。
+    usage: /crime [info|set|reset] [player] [value]
+permissions:
+  crimebuster.admin:
+    description: CrimeBuster の管理者権限。
+    default: op

@@ -1,0 +1,43 @@
+# Gemma 4 API Configuration
+gemma:
+  url: "http://localhost:11434/api/generate"
+  model: "gemma4:latest"
+  # 同時解析実行数（DoS対策）
+  concurrency_limit: 3
+  # 全体での秒間解析リクエスト上限
+  global_rate_limit: 10
+  # APIリクエストのタイムアウト（秒）
+  timeout_seconds: 10
+  # ローカルネットワーク内へのアクセスを許可するか（SSRF対策。基本 true で問題なし）
+  allow_internal_networks: true
+
+# Analysis Settings
+analysis:
+  # 解析対象とするメッセージの最大長
+  max_message_length: 1000
+  # LLMに送信するチャット履歴の保持数
+  chat_history_size: 20
+
+# Punishment Thresholds
+thresholds:
+  kick: 70
+  ban: 100
+
+# Punishment Durations (in days)
+durations:
+  ban: 1
+
+# Automatic Crime Decay
+decay:
+  interval_minutes: 60
+  amount: 1
+
+# Rate Limiting (in seconds)
+cooldown:
+  chat_analysis: 5
+  intimacy_gain: 30
+
+# Data Persistence
+persistence:
+  auto_save_minutes: 5
+  immediate_save_threshold: 50
