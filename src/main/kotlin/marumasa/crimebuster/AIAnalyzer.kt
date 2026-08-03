@@ -259,8 +259,11 @@ class AIAnalyzer(private val plugin: CrimeBuster) {
             .replace("}", "｝")
             .replace("<", "＜")
             .replace(">", "＞")
-        
-        // 3. プロンプトインジェクションで多用される記号の無害化
+
+        // 3. 重複するデリミタ的なパターンの抑制（プロンプト境界の偽装を防止）
+        clean = clean.replace(Regex("(?i)DATA_BLOCK_"), "D_B_")
+
+        // 4. プロンプトインジェクションで多用される記号の無害化
         // バックスラッシュ、バッククォート（コードブロック）、ハッシュ（見出し）などを全角化
         clean = clean
             .replace("\\", "＼")
@@ -277,9 +280,6 @@ class AIAnalyzer(private val plugin: CrimeBuster) {
             .replace(":", "：")
             .replace(";", "；")
 
-        // 4. 重複するデリミタ的なパターンの抑制（プロンプト境界の偽装を防止）
-        clean = clean.replace(Regex("(?i)DATA_BLOCK_"), "D_B_")
-        
         // 5. 特権的なキーワードの難読化（直接的な命令を回避するため）
         val sensitivePatterns = listOf("SYSTEM", "ADMIN", "DEVELOPER", "INSTRUCTION", "IGNORE", "FORMAT", "JSON")
         sensitivePatterns.forEach { pattern ->
