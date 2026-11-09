@@ -82,11 +82,15 @@ func (g *Guard) Dismiss(id, by, reason string) (*Record, error) {
 		return nil, err
 	}
 	defer g.release(id)
-	return g.update(id, func(r *Record) {
+	return g.update(id, func(r *Record) error {
 		if r.State == StatePending {
-			r.State = StateDismissed
+			// pending であることを確かめた直後なので、この遷移は失敗しない
+			if err := r.Transition(StateDismissed); err != nil {
+				return err
+			}
 			r.decide(time.Now().Unix(), by, "dismiss", cleanText(reason, 300))
 		}
+		return nil
 	})
 }
 
@@ -109,7 +113,7 @@ func (g *Guard) ReportIncident(ctx context.Context, id, by, note string) (*Recor
 	if err != nil {
 		return nil, err
 	}
-	if rec.Reported {
+	if rec.State == StateReported {
 		return nil, fmt.Errorf("%w: すでに通報しています (投稿 %s)", ErrConflict, rec.Thread)
 	}
 	if rec.State == StateDismissed {
@@ -177,10 +181,14 @@ func (g *Guard) ReportIncident(ctx context.Context, id, by, note string) (*Recor
 	g.store.S.Threads[key] = ThreadRef{ThreadID: thread, At: now}
 	_ = g.store.Save()
 	g.mu.Unlock()
-	return g.update(id, func(r *Record) {
-		r.State, r.Reported, r.Thread = StateReported, true, thread
+	return g.update(id, func(r *Record) error {
+		if err := r.Transition(StateReported); err != nil {
+			return err
+		}
+		r.Thread = thread
 		r.RollbackCmd, r.RestoreCmd = rec.RollbackCmd, rec.RestoreCmd
 		r.decide(now, by, "report", cleanText(note, 300))
+		return nil
 	})
 }
 
@@ -213,11 +221,12 @@ func (g *Guard) StartRollback(ctx context.Context, id, by string) (*Record, erro
 			g.log.Error("ロールバックに失敗", "incident", id, "err", err)
 			note = "失敗: " + err.Error()
 		}
-		_, _ = g.update(id, func(r *Record) {
+		_, _ = g.update(id, func(r *Record) error {
 			if err == nil {
 				r.RolledBack = true
 			}
 			r.decide(time.Now().Unix(), by, "rollback", note)
+			return nil
 		})
 	}()
 	return rec, nil
@@ -302,13 +311,14 @@ func (g *Guard) runRollback(ctx context.Context, rec *Record) (string, error) {
 	got := g.bluemapShot(ctx, g.cfg.MapIDs[stats.World], stats, CamFor(stats), out,
 		AnnotFor(stats, fmt.Sprintf("%s  RESTORED (rollback done)", stats.User.Name), "yellow = affected area", false), true)
 	if got != "" {
-		_, _ = g.update(rec.ID, func(r *Record) {
+		_, _ = g.update(rec.ID, func(r *Record) error {
 			for _, n := range r.Images {
 				if n == "restored.png" {
-					return
+					return nil
 				}
 			}
 			r.Images = append(r.Images, "restored.png")
+			return nil
 		})
 	}
 	return note, nil

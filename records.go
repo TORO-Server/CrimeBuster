@@ -13,12 +13,27 @@ import (
 	"time"
 )
 
-// 事件の状態。コネクタ (control) は、pending のものを「確認待ち」として見せる。
+// IncidentState は事件の状態。コネクタ (control) は、pending のものを「確認待ち」として見せる。
+// record.json には、この文字列のまま保存する。
+type IncidentState string
+
 const (
-	StatePending   = "pending"   // 確認待ち (通報も却下もまだ)
-	StateReported  = "reported"  // フォーラムに通報した
-	StateDismissed = "dismissed" // 却下した (荒らしではなかった、など)
+	StatePending   IncidentState = "pending"   // 確認待ち (通報も却下もまだ)
+	StateReported  IncidentState = "reported"  // フォーラムに通報した
+	StateDismissed IncidentState = "dismissed" // 却下した (荒らしではなかった、など)
 )
+
+// Transition は、事件の状態を変える唯一の場所。許可する遷移は
+// pending → reported と pending → dismissed だけとし、それ以外はエラーを返して状態を変えない。
+// Reported は State の派生なので、ここで同期させる (reported は、State が reported のときだけ true)。
+func (r *Record) Transition(to IncidentState) error {
+	if r.State != StatePending || (to != StateReported && to != StateDismissed) {
+		return fmt.Errorf("事件の状態は %s から %s へ変えられません", r.State, to)
+	}
+	r.State = to
+	r.Reported = to == StateReported
+	return nil
+}
 
 // Decision は、事件に対して誰が何をしたかの記録。
 type Decision struct {
@@ -41,12 +56,12 @@ type Record struct {
 	World   string `json:"world,omitempty"`
 	Trigger string `json:"trigger"`
 
-	State      string `json:"state"`
-	Busy       string `json:"busy,omitempty"` // 裏で動いている操作 (rollback)
-	Reported   bool   `json:"reported"`
-	Thread     string `json:"thread,omitempty"`
-	RolledBack bool   `json:"rolled_back"`
-	Muted      bool   `json:"muted,omitempty"`
+	State      IncidentState `json:"state"`
+	Busy       string        `json:"busy,omitempty"` // 裏で動いている操作 (rollback)
+	Reported   bool          `json:"reported"`
+	Thread     string        `json:"thread,omitempty"`
+	RolledBack bool          `json:"rolled_back"`
+	Muted      bool          `json:"muted,omitempty"`
 
 	Images      []string `json:"images,omitempty"` // 同じフォルダの中のファイル名
 	Breaks      int      `json:"breaks,omitempty"`
@@ -115,7 +130,7 @@ func (g *Guard) Record(id string) (*Record, error) {
 }
 
 // Records は、新しい順の事件の一覧。state が空なら、すべて。
-func (g *Guard) Records(state string, limit int) ([]*Record, error) {
+func (g *Guard) Records(state IncidentState, limit int) ([]*Record, error) {
 	entries, err := os.ReadDir(filepath.Join(g.cfg.DataDir, "reports"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
@@ -148,7 +163,8 @@ func (g *Guard) Records(state string, limit int) ([]*Record, error) {
 }
 
 // update は、事件の記録を読み直して f で書き換えて保存する (同じ事件への操作が重ならないように g.recMu を持つ)。
-func (g *Guard) update(id string, f func(*Record)) (*Record, error) {
+// f がエラーを返したら、保存せずにそのエラーを返す。
+func (g *Guard) update(id string, f func(*Record) error) (*Record, error) {
 	if !validID(id) {
 		return nil, ErrNoRecord
 	}
@@ -161,7 +177,9 @@ func (g *Guard) update(id string, f func(*Record)) (*Record, error) {
 	if err != nil {
 		return nil, err
 	}
-	f(r)
+	if err := f(r); err != nil {
+		return nil, err
+	}
 	return r, saveRecord(g.reportDir(id), r)
 }
 

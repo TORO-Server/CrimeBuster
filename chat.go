@@ -486,7 +486,11 @@ func (g *Guard) ProcessChat(ctx context.Context, inc *Incident, end int64) (*Cha
 		State: StatePending, Messages: len(msgs), Muted: res.Muted,
 	}
 	if res.ThreadID != "" {
-		rec.State, rec.Reported, rec.Thread = StateReported, true, res.ThreadID
+		// 作った直後で状態は pending。遷移できなければ、記録を書かずに中断する
+		if err := rec.Transition(StateReported); err != nil {
+			return res, err
+		}
+		rec.Thread = res.ThreadID
 		rec.decide(rec.Created, "crime-buster", "report", "")
 	}
 	if res.Muted {

@@ -240,7 +240,7 @@ func summary(r *Record) map[string]any {
 }
 
 func (c *Control) incidents(r *http.Request) (*result, error) {
-	state := r.URL.Query().Get("state")
+	state := IncidentState(r.URL.Query().Get("state"))
 	switch state {
 	case "", StatePending, StateReported, StateDismissed:
 	case "all":
@@ -460,9 +460,19 @@ func (c *Control) kick(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"ok": true}}, nil
 }
 
+// ShotJobState は、撮影ジョブの状態。事件の状態 (IncidentState) とは別の概念なので、型も分ける。
+// HTTP の応答には、この文字列のまま出す。
+type ShotJobState string
+
+const (
+	ShotJobPending ShotJobState = "pending" // 撮影中
+	ShotJobDone    ShotJobState = "done"    // 撮影できた
+	ShotJobFailed  ShotJobState = "failed"  // 撮影できなかった
+)
+
 // shotJob は、裏で撮っている BlueMap の画像 1 枚。
 type shotJob struct {
-	State string // pending / done / failed
+	State ShotJobState
 	Path  string
 	Err   string
 	At    time.Time
@@ -519,7 +529,7 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 	}
 	pending := 0
 	for _, j := range c.shots {
-		if j.State == "pending" {
+		if j.State == ShotJobPending {
 			pending++
 		}
 	}
@@ -530,7 +540,7 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 	buf := make([]byte, 8)
 	_, _ = rand.Read(buf)
 	id := hex.EncodeToString(buf)
-	job := &shotJob{State: "pending", At: time.Now()}
+	job := &shotJob{State: ShotJobPending, At: time.Now()}
 	c.shots[id] = job
 	c.shotMu.Unlock()
 
@@ -549,13 +559,13 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 		c.shotMu.Lock()
 		defer c.shotMu.Unlock()
 		if err != nil {
-			job.State, job.Err = "failed", err.Error()
+			job.State, job.Err = ShotJobFailed, err.Error()
 			return
 		}
-		job.State, job.Path = "done", out
+		job.State, job.Path = ShotJobDone, out
 	}()
 	return &result{code: http.StatusAccepted, body: map[string]any{
-		"job": id, "status": "pending", "message": "撮影を始めました。1 分ほどで、この job の画像を取れます",
+		"job": id, "status": string(ShotJobPending), "message": "撮影を始めました。1 分ほどで、この job の画像を取れます",
 	}}, nil
 }
 
@@ -572,9 +582,9 @@ func (c *Control) screenshotResult(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case !ok:
 		writeJSONResp(w, http.StatusNotFound, map[string]any{"error": "job not found (もう捨てたか、番号が違います)"})
-	case snap.State == "pending":
-		writeJSONResp(w, http.StatusAccepted, map[string]any{"job": id, "status": "pending"})
-	case snap.State == "failed":
+	case snap.State == ShotJobPending:
+		writeJSONResp(w, http.StatusAccepted, map[string]any{"job": id, "status": string(ShotJobPending)})
+	case snap.State == ShotJobFailed:
 		writeJSONResp(w, http.StatusInternalServerError, map[string]any{"error": snap.Err})
 	default:
 		b, err := os.ReadFile(snap.Path)
