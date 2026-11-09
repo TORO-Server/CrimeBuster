@@ -79,7 +79,9 @@ var idRE = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,100}$`)
 // validID は事件の ID として安全か (フォルダ名に使うので、区切りや .. を通さない)。
 func validID(id string) bool { return idRE.MatchString(id) && !strings.Contains(id, "..") }
 
-func (g *Guard) reportDir(id string) string { return filepath.Join(g.cfg.StorageConfig.DataDir, "reports", id) }
+func (g *Guard) reportDir(id string) string {
+	return filepath.Join(g.cfg.StorageConfig.DataDir, "reports", id)
+}
 
 func recordPath(dir string) string { return filepath.Join(dir, "record.json") }
 
