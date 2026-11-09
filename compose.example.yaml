@@ -1,0 +1,172 @@
+# 本番の docker-compose.yaml に足すサービス定義の例。
+# 最初は CRIMEBUSTER_MODE=observe (見つけて記録するだけ)。dry-run (画像と報告文を作るだけ) で確かめてから live にする。
+#
+#   crime-buster-data/ を作って、65532 が書けるようにする:  mkdir crime-buster-data && sudo chown 65532:65532 crime-buster-data
+#   DOCKER_GID は、ホストの docker グループの番号:        getent group docker | cut -d: -f3
+#
+# 部品は 3 つに分ける。crime-buster は Docker のソケットを持たず、Chromium も動かさない。
+#   crime-buster    監視と操作のためのコネクタ。CoreProtect と Discord-MCP につなぐ
+#   toro-console  同じイメージの console-relay。ソケットを持つのはこれだけで、決まった形のコマンドしか送らない
+#   toro-chrome   BlueMap の画面を撮るブラウザ。インターネットに出ない。ソケットも秘密も持たない
+  # Discord への投稿は、Discord-MCP (かふぇほらいずん公式のイメージ) の経由で行う。
+  # トークンはここに置かない: crime-buster が DiscordSRV の BotToken を、呼ぶたびに authOverride で渡す。
+  # DISCORD_BOT_TOKEN は起動に要るだけの印 (使わない)。外には公開せず (ports なし)、必要なツールだけ登録する。
+  discord-mcp:
+    image: ghcr.io/cafe-horizon/discord-mcp:1.3.1@sha256:929f70cd1db94fe90fa0772312a30a4f55f15f5884e07d6d1f8109c263b05516
+    container_name: discord-mcp
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      - DISCORD_BOT_TOKEN=unused
+      - MCP_TRANSPORT=http
+      - MCP_HTTP_PORT=8080
+      - MCP_ALLOWED_HOSTS=discord-mcp:8080
+      - DISCORD_MCP_LAZY_TOOLS=true
+      - DISCORD_MCP_ALLOW_AUTH_OVERRIDE=true
+      - DISCORD_MCP_ENABLE_GATEWAY=false
+      - DISCORD_MCP_ALLOW_FILE_PATH=false
+      - DISCORD_MCP_ALLOW_FILE_URL=false
+      # 通報に要る操作と、Muse など (Admin 以上) がコネクタ経由で使う読み取りだけ。BAN・キック・ロール・削除は含めない。
+      # crime-buster の CONTROL_DISCORD_ALLOW (コネクタの許可) も、同じ範囲にしてある (二重に絞る)
+      - DISCORD_MCP_INCLUDE_TOOLS=^discord_(call_tool|search_tools|get_my_user|get_channel|list_channel_messages|list_messages|get_message|get_channel_message|create_message|create_thread|update_channel|list_guild_channels|list_guild_roles|get_guild_member|search_guild_members|list_active_guild_threads|list_thread_members)$$
+    networks:
+      - minecraft-network
+
+  # コンソールの中継。toro-main のコンソールに docker attach と同じ方法でつなぐ。ソケットは root と同じ力なので、ここだけに置く。
+  # 送れるのは、crime-buster が送る形のコマンドだけ (README の「コンソール」)。ネットワークは crime-buster と 2 つだけのもの
+  toro-console:
+    image: ghcr.io/toro-server/crime-buster:latest
+    container_name: toro-console
+    command: ["console-relay"]
+    user: "65532:65532"
+    group_add:
+      - "${DOCKER_GID}"
+    restart: unless-stopped
+    read_only: true
+    pids_limit: 64
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "/crime-buster", "healthcheck", "-relay"]
+      interval: 30s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+    environment:
+      - MC_CONTAINER=toro-main
+      # crime-buster の CHAT_MUTE_CMD と同じにする (許可の形になる)
+      - CHAT_MUTE_CMD=
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock"
+    networks:
+      - toro-console-net
+
+  # BlueMap の画面を撮るブラウザ。イメージは別のリポジトリで作る。BlueMap の名前を toro-edge に向けるのは、イメージのフラグで行う。
+  # プレイヤーの置いた看板がある地図を開くので、ソケットも秘密も渡さず、インターネットにも出さない。
+  # init: Chromium の子プロセスを回収する。pids_limit: 増えすぎを止める
+  # toro-chrome:
+  #   image: (別のリポジトリのイメージを digest で固定する)
+  #   container_name: toro-chrome
+  #   init: true
+  #   pids_limit: 512
+  #   restart: unless-stopped
+  #   read_only: true
+  #   tmpfs:
+  #     - /tmp
+  #   cap_drop:
+  #     - ALL
+  #   security_opt:
+  #     - no-new-privileges:true
+  #   networks:
+  #     - toro-browser-net
+  #     - toro-map-net
+
+  crime-buster:
+    image: ghcr.io/toro-server/crime-buster:latest
+    container_name: crime-buster
+    user: "65532:65532"
+    restart: unless-stopped
+    read_only: true
+    pids_limit: 128
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    depends_on:
+      - tidb
+      - discord-mcp
+      - toro-console
+    environment:
+      - TZ=Asia/Tokyo
+      # observe → dry-run → review (人や Muse が見て決める) → live (自動でロールバックまで) の順に上げる
+      - CRIMEBUSTER_MODE=observe
+      # 操作のためのコネクタ (:8090、内部のネットワークだけ。ports は付けない)。TORO-MCP が、利用者の OAuth のトークンをそのまま渡す。
+      # コネクタが auth の /introspect に尋ね、いまの Discord のロールが Admin 以上 (ADMIN_ROLE_IDS) の人だけを通す。共有の秘密は無い
+      - AUTH_INTERNAL_URL=http://toro-auth:8081
+      - ADMIN_ROLE_IDS=
+      - DB_HOST=tidb
+      # CoreProtect を読むだけ。SELECT だけの専用のユーザーにする: GRANT SELECT ON coreprotect.* TO 'toro_guard'@'%'
+      - DB_USER=toro_guard
+      - DB_PASSWORD_FILE=/run/secrets/crime-buster-db
+      # 通報先は、荒らし通報フォーラム。トークンは DiscordSRV の config.yml (BotToken) を読み、Discord-MCP に渡す
+      # (専用のボットにするなら DISCORD_BOT_TOKEN_FILE でファイル 1 つを渡し、DiscordSRV のフォルダはマウントしない)
+      - DISCORD_MCP_URL=http://discord-mcp:8080/mcp
+      - REPORT_CHANNEL_ID=
+      - ROLLBACK_TAG_ID=
+      # コンソールは中継に頼む
+      - CONSOLE_URL=http://toro-console:8091
+      # BlueMap は別のコンテナのブラウザで撮る (ブラウザは外に出ず、toro-edge から読む。Host は 3d-map.torosaba.net のまま)
+      - BROWSER_URL=ws://toro-chrome:9222
+      - BLUEMAP_URL=http://3d-map.torosaba.net
+      - MAP_IDS=main=overworld
+      # AI (Claude) の確認。キーを渡したときだけ使う (荒らしの確認と、チャットの暴言)。キーは .env に置き、リポジトリには置かない
+      - AI_API_KEY=${TORO_CRIMEBUSTER_AI_KEY:-}
+      # チャットのスパムを見つけたら「mute {name} 10m spam」を送る (使うミュートのプラグインに合わせる。空なら、ミュートはしない)。
+      # toro-console にも同じ値を渡す
+      - CHAT_MUTE_CMD=
+      # 報告に「ワープ ○○ の近く」と書く
+      - WARPS_DIR=/warps
+      # 検知の対象にしない人 (名前をコンマで区切る)。道具を使う人は、コマンドで自動でも外れる
+      - TRUSTED_PLAYERS=
+      # op は信頼する人として扱う (運営が地形を直すのを、荒らしと見ない)
+      - OPS_FILE=/ops.json
+    secrets:
+      - crime-buster-db
+    volumes:
+      - "./crime-buster-data:/data"
+      # DiscordSRV のボットのトークン (BotToken) を読むだけ。ファイル 1 つではなく、フォルダで (DiscordSRV が置き換えて書いても追えるように)
+      - "./main/plugins/DiscordSRV:/discordsrv:ro"
+      - "./main/plugins/Essentials/warps:/warps:ro"
+      - "./main/ops.json:/ops.json:ro"
+    networks:
+      - minecraft-network
+      - toro-console-net
+      - toro-browser-net
+
+  # TORO-MCP (mcp.torosaba.net) が、crime-buster のコネクタに頼むために足す設定 (ServerImage の toro-mcp の environment に)。
+  # 管理用のツール (guard_* と discord_*) は、いまの Discord のロールが ADMIN_ROLE_IDS (既定: Owner と Admin) の人にだけ見える。
+  # 利用者のトークンをそのままコネクタに渡すので、秘密は増えない。toro-auth には DISCORD_BOT_TOKEN が要る (いまのロールを調べるため)。
+  #   - CRIMEBUSTER_CONTROL_URL=http://crime-buster:8090
+  #   - ADMIN_ROLE_IDS=
+
+# 一番上の networks と secrets に足す。どれも internal で、外には出られない。
+#
+# networks:
+#   toro-console-net:     # crime-buster と toro-console だけ
+#     internal: true
+#   toro-browser-net:     # crime-buster と toro-chrome だけ
+#     internal: true
+#   toro-map-net:         # toro-chrome と toro-edge だけ (toro-edge にも足す)
+#     internal: true
+#
+# secrets:
+#   crime-buster-db:
+#     file: ./secrets/crime-buster-db   # 65532 が読めるようにする

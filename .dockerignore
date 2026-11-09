@@ -1,0 +1,7 @@
+.git
+.github
+replay-out
+replay-sw
+run-test
+*.exe
+*.md

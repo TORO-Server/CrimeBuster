@@ -1,0 +1,6 @@
+/crime-buster
+/crime-buster.exe
+*.test
+replay-out/
+replay-sw/
+run-test/

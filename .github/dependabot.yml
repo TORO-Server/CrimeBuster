@@ -1,0 +1,15 @@
+# Go のモジュール、ベースイメージ、GitHub Actions の更新を週に 1 回見る (ブラウザのイメージは、別のリポジトリで見る)
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
