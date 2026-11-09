@@ -122,7 +122,7 @@ type ChatDetector struct {
 const chatKeep = 5 * 60 // 秒
 
 func NewChatDetector(cfg *Config) *ChatDetector {
-	return &ChatDetector{cfg: cfg, bad: loadWords(cfg.ChatBadWordsFile), per: map[int][]chatRec{}}
+	return &ChatDetector{cfg: cfg, bad: loadWords(cfg.ChatConfig.ChatBadWordsFile), per: map[int][]chatRec{}}
 }
 
 // loadWords は 1 行に 1 語のファイルを読む (空の行と # の行は飛ばす)。無ければ空。
@@ -206,16 +206,16 @@ func (d *ChatDetector) Feed(m ChatMsg) *ChatTrigger {
 			return trig("badword", "禁止語を含む発言")
 		}
 	}
-	if n := countSince(recs, m.Time-int64(cfg.ChatRateWindow.Seconds()), nil); cfg.ChatRate > 0 && n >= cfg.ChatRate {
-		return trig("flood", fmt.Sprintf("%d 件 / %s", n, cfg.ChatRateWindow))
+	if n := countSince(recs, m.Time-int64(cfg.ChatConfig.ChatRateWindow.Seconds()), nil); cfg.ChatConfig.ChatRate > 0 && n >= cfg.ChatConfig.ChatRate {
+		return trig("flood", fmt.Sprintf("%d 件 / %s", n, cfg.ChatConfig.ChatRateWindow))
 	}
-	if rec.norm != "" && len([]rune(rec.norm)) >= 2 && cfg.ChatRepeat > 0 {
-		n := countSince(recs, m.Time-int64(cfg.ChatRepeatWindow.Seconds()), func(r chatRec) bool { return r.norm == rec.norm })
-		if n >= cfg.ChatRepeat {
-			return trig("repeat", fmt.Sprintf("同じ発言 %d 回 / %s", n, cfg.ChatRepeatWindow))
+	if rec.norm != "" && len([]rune(rec.norm)) >= 2 && cfg.ChatConfig.ChatRepeat > 0 {
+		n := countSince(recs, m.Time-int64(cfg.ChatConfig.ChatRepeatWindow.Seconds()), func(r chatRec) bool { return r.norm == rec.norm })
+		if n >= cfg.ChatConfig.ChatRepeat {
+			return trig("repeat", fmt.Sprintf("同じ発言 %d 回 / %s", n, cfg.ChatConfig.ChatRepeatWindow))
 		}
 	}
-	if cfg.ChatRun > 0 && longestRun(m.Msg) >= cfg.ChatRun {
+	if cfg.ChatConfig.ChatRun > 0 && longestRun(m.Msg) >= cfg.ChatConfig.ChatRun {
 		return trig("run", fmt.Sprintf("同じ文字が %d 個つづく", longestRun(m.Msg)))
 	}
 	if rec.inv {
@@ -223,8 +223,8 @@ func (d *ChatDetector) Feed(m ChatMsg) *ChatTrigger {
 			return trig("invite", fmt.Sprintf("Discord の招待リンクを %d 回 / 5 分", n))
 		}
 	}
-	if rec.link && cfg.ChatLinkRepeat > 0 {
-		if n := countSince(recs, m.Time-chatKeep, func(r chatRec) bool { return r.link }); n >= cfg.ChatLinkRepeat {
+	if rec.link && cfg.ChatConfig.ChatLinkRepeat > 0 {
+		if n := countSince(recs, m.Time-chatKeep, func(r chatRec) bool { return r.link }); n >= cfg.ChatConfig.ChatLinkRepeat {
 			return trig("link", fmt.Sprintf("リンクつきの発言 %d 回 / 5 分", n))
 		}
 	}
@@ -366,7 +366,7 @@ func cmdScanChat(args []string) error {
 		return err
 	}
 	det := NewChatDetector(cfg)
-	ops := LoadOps(cfg.OpsFile)
+	ops := LoadOps(cfg.DetectConfig.OpsFile)
 	type hit struct {
 		T    int64
 		Name string
@@ -385,7 +385,7 @@ func cmdScanChat(args []string) error {
 			continue
 		}
 		h := hit{T: m.Time, Name: u.Name, Trig: t.String()}
-		if cfg.TrustedPlayers[strings.ToLower(u.Name)] || ops[strings.ToLower(u.Name)] {
+		if cfg.DetectConfig.TrustedPlayers[strings.ToLower(u.Name)] || ops[strings.ToLower(u.Name)] {
 			h.Why = "信頼する人"
 		}
 		cool[m.User] = m.Time + 600
@@ -393,7 +393,7 @@ func cmdScanChat(args []string) error {
 	}
 	sort.Slice(hits, func(i, j int) bool { return hits[i].T < hits[j].T })
 	fmt.Printf("見た発言: %d 件 (%.0f 日)  閾値: 連投 %d 件/%s、同文 %d 回/%s、同じ文字 %d、リンク %d 回/5 分\n",
-		len(msgs), days, cfg.ChatRate, cfg.ChatRateWindow, cfg.ChatRepeat, cfg.ChatRepeatWindow, cfg.ChatRun, cfg.ChatLinkRepeat)
+		len(msgs), days, cfg.ChatConfig.ChatRate, cfg.ChatConfig.ChatRateWindow, cfg.ChatConfig.ChatRepeat, cfg.ChatConfig.ChatRepeatWindow, cfg.ChatConfig.ChatRun, cfg.ChatConfig.ChatLinkRepeat)
 	n := 0
 	for _, h := range hits {
 		if h.Why != "" {
@@ -430,7 +430,7 @@ func (g *Guard) ProcessChat(ctx context.Context, inc *Incident, end int64) (*Cha
 	if len(msgs) == 0 {
 		return nil, fmt.Errorf("no chat found for %s", inc.Name)
 	}
-	dir := filepath.Join(g.cfg.DataDir, "reports", inc.ID)
+	dir := filepath.Join(g.cfg.StorageConfig.DataDir, "reports", inc.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
@@ -441,7 +441,7 @@ func (g *Guard) ProcessChat(ctx context.Context, inc *Incident, end int64) (*Cha
 
 	in := ChatReportInput{Name: inc.Name, UUID: inc.UUID, Msgs: msgs, Trigger: inc.Trigger, Mode: g.cfg.Mode}
 	if !inc.AIOnly {
-		in.MuteCmd = MuteCommand(g.cfg.ChatMuteCmd, inc.Name)
+		in.MuteCmd = MuteCommand(g.cfg.ChatConfig.ChatMuteCmd, inc.Name)
 	}
 	if CapabilitiesFor(g.cfg.Mode).AutoMute && in.MuteCmd != "" && g.ops != nil {
 		if _, err := g.ops.C.Run(ctx, in.MuteCmd, sendOnlyTimeout, nil); err != nil {
@@ -467,8 +467,8 @@ func (g *Guard) ProcessChat(ctx context.Context, inc *Incident, end int64) (*Cha
 		}
 		g.mu.Unlock()
 		var tags []string
-		if res.Muted && g.cfg.ChatMuteTagID != "" {
-			tags = append(tags, g.cfg.ChatMuteTagID)
+		if res.Muted && g.cfg.ChatConfig.ChatMuteTagID != "" {
+			tags = append(tags, g.cfg.ChatConfig.ChatMuteTagID)
 		}
 		id, err := g.reporter.PostTags(ctx, existing, safeChat(inc.Name, 90), res.Report, nil, tags)
 		if err != nil {

@@ -34,7 +34,7 @@ func cmdScan(log *slog.Logger, args []string) error {
 		return err
 	}
 	fmt.Printf("開始: %s (rowid %d)  閾値: 壊 %d / 置 %d / %s、長い窓 壊 %d / %s\n",
-		time.Unix(since, 0).In(jst).Format("01/02 15:04"), rid, cfg.BreakBurst, cfg.PlaceBurst, cfg.BurstWindow, cfg.SustainedBreaks, cfg.SustainedWindow)
+		time.Unix(since, 0).In(jst).Format("01/02 15:04"), rid, cfg.DetectConfig.BreakBurst, cfg.DetectConfig.PlaceBurst, cfg.DetectConfig.BurstWindow, cfg.DetectConfig.SustainedBreaks, cfg.DetectConfig.SustainedWindow)
 
 	type hit struct {
 		Name    string
@@ -44,7 +44,7 @@ func cmdScan(log *slog.Logger, args []string) error {
 	}
 	var hits []hit
 	det := NewDetector(cfg)
-	ops := LoadOps(cfg.OpsFile)
+	ops := LoadOps(cfg.DetectConfig.OpsFile)
 	suppressed := map[int]int64{}
 	total := 0
 	cursor := rid - 1
@@ -69,16 +69,16 @@ func cmdScan(log *slog.Logger, args []string) error {
 			case strings.HasPrefix(u.Name, "#"):
 				h.Why = "人ではない"
 				suppressed[t.User] = e.Time + 3600
-			case cfg.TrustedPlayers[strings.ToLower(u.Name)] || ops[strings.ToLower(u.Name)]:
+			case cfg.DetectConfig.TrustedPlayers[strings.ToLower(u.Name)] || ops[strings.ToLower(u.Name)]:
 				h.Why = "信頼する人"
 				suppressed[t.User] = e.Time + 3600
 			default:
-				cmd, _ := cp.RecentEditCommand(ctx, t.User, e.Time-int64(cfg.WEGrace.Seconds()))
+				cmd, _ := cp.RecentEditCommand(ctx, t.User, e.Time-int64(cfg.DetectConfig.WEGrace.Seconds()))
 				if cmd != "" {
 					h.Why = "編集コマンド " + cmd
 					suppressed[t.User] = e.Time + 600
 				} else {
-					suppressed[t.User] = e.Time + int64(cfg.MaxIncident.Seconds()) // 事件として 1 回数える
+					suppressed[t.User] = e.Time + int64(cfg.DetectConfig.MaxIncident.Seconds()) // 事件として 1 回数える
 				}
 			}
 			hits = append(hits, h)

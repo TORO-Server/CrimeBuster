@@ -16,8 +16,10 @@ import (
 
 func testCfg() *Config {
 	return &Config{
-		BurstWindow: 5 * time.Second, BreakBurst: 100, PlaceBurst: 150,
-		SustainedWindow: 10 * time.Minute, SustainedBreaks: 1500,
+		DetectConfig: DetectConfig{
+			BurstWindow: 5 * time.Second, BreakBurst: 100, PlaceBurst: 150,
+			SustainedWindow: 10 * time.Minute, SustainedBreaks: 1500,
+		},
 	}
 }
 
@@ -546,11 +548,11 @@ func TestConfigSecretsFromFiles(t *testing.T) {
 }
 
 func TestReporterForPrefersBotToken(t *testing.T) {
-	r, err := reporterFor(&Config{BotToken: "direct", DiscordSRVConfig: filepath.Join(t.TempDir(), "none.yml")})
+	r, err := reporterFor(&Config{DiscordConfig: DiscordConfig{BotToken: "direct", DiscordSRVConfig: filepath.Join(t.TempDir(), "none.yml")}})
 	if err != nil || r.auth != "Bot direct" {
 		t.Fatalf("%+v %v", r, err)
 	}
-	if _, err := reporterFor(&Config{DiscordSRVConfig: filepath.Join(t.TempDir(), "none.yml")}); err == nil {
+	if _, err := reporterFor(&Config{DiscordConfig: DiscordConfig{DiscordSRVConfig: filepath.Join(t.TempDir(), "none.yml")}}); err == nil {
 		t.Fatal("どちらも無ければ、エラー")
 	}
 }
@@ -670,7 +672,7 @@ func TestSweepData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	g := NewGuard(&Config{DataDir: dir, ReportRetention: 24 * time.Hour}, nil, st, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	g := NewGuard(&Config{StorageConfig: StorageConfig{DataDir: dir}, RetentionConfig: RetentionConfig{ReportRetention: 24 * time.Hour}}, nil, st, nil, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	now := time.Now()
 	put := func(id string, created time.Time) string {
 		d := filepath.Join(dir, "reports", id)
@@ -767,7 +769,7 @@ func TestCheckHealthFile(t *testing.T) {
 	if err := checkHealthFile(dir, time.Now()); err == nil {
 		t.Fatal("ファイルが無ければ、エラー")
 	}
-	touchHealth(&Config{DataDir: dir})
+	touchHealth(&Config{StorageConfig: StorageConfig{DataDir: dir}})
 	if err := checkHealthFile(dir, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -786,7 +788,7 @@ func newDBGuard(t *testing.T, mode Mode, answers ...fakeAnswer) (*Guard, *fakeCo
 	}
 	cp, db := newFakeCP(t, answers...)
 	con := &fakeConsole{}
-	cfg := &Config{Mode: mode, DataDir: dir, WEGrace: 30 * time.Minute, ChatMuteCmd: "mute {name} 10m spam", TrustedPlayers: map[string]bool{}, MapIDs: map[string]string{}}
+	cfg := &Config{Mode: mode, StorageConfig: StorageConfig{DataDir: dir}, DetectConfig: DetectConfig{WEGrace: 30 * time.Minute, TrustedPlayers: map[string]bool{}}, ChatConfig: ChatConfig{ChatMuteCmd: "mute {name} 10m spam"}, ShotConfig: ShotConfig{MapIDs: map[string]string{}}}
 	g := NewGuard(cfg, cp, st, &Ops{C: con}, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	g.rollbackConfirmWait = time.Millisecond
 	return g, con, db

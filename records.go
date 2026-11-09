@@ -79,7 +79,9 @@ var idRE = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,100}$`)
 // validID は事件の ID として安全か (フォルダ名に使うので、区切りや .. を通さない)。
 func validID(id string) bool { return idRE.MatchString(id) && !strings.Contains(id, "..") }
 
-func (g *Guard) reportDir(id string) string { return filepath.Join(g.cfg.DataDir, "reports", id) }
+func (g *Guard) reportDir(id string) string {
+	return filepath.Join(g.cfg.StorageConfig.DataDir, "reports", id)
+}
 
 func recordPath(dir string) string { return filepath.Join(dir, "record.json") }
 
@@ -131,7 +133,7 @@ func (g *Guard) Record(id string) (*Record, error) {
 
 // Records は、新しい順の事件の一覧。state が空なら、すべて。
 func (g *Guard) Records(state IncidentState, limit int) ([]*Record, error) {
-	entries, err := os.ReadDir(filepath.Join(g.cfg.DataDir, "reports"))
+	entries, err := os.ReadDir(filepath.Join(g.cfg.StorageConfig.DataDir, "reports"))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, nil
 	}
@@ -207,8 +209,8 @@ func (g *Guard) sweepLoop(ctx context.Context) {
 // sweepData は、保持期限を過ぎた事件のフォルダと、撮影の結果を消す (ディスクを使い切らないように)。
 // 消すのは reports/ と shots/ の中だけ。いま動いている事件は消さない。REPORT_RETENTION が 0 なら、事件は消さない。
 func (g *Guard) sweepData(now time.Time) {
-	if keep := g.cfg.ReportRetention; keep > 0 {
-		root := filepath.Join(g.cfg.DataDir, "reports")
+	if keep := g.cfg.RetentionConfig.ReportRetention; keep > 0 {
+		root := filepath.Join(g.cfg.StorageConfig.DataDir, "reports")
 		entries, _ := os.ReadDir(root)
 		for _, e := range entries {
 			if !e.IsDir() || !validID(e.Name()) || g.isBusy(e.Name()) {
@@ -223,7 +225,7 @@ func (g *Guard) sweepData(now time.Time) {
 			}
 		}
 	}
-	dir := filepath.Join(g.cfg.DataDir, "shots")
+	dir := filepath.Join(g.cfg.StorageConfig.DataDir, "shots")
 	entries, _ := os.ReadDir(dir)
 	for _, e := range entries {
 		if info, err := e.Info(); err == nil && info.Mode().IsRegular() && now.Sub(info.ModTime()) > shotRetention {

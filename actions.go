@@ -43,7 +43,7 @@ func (g *Guard) checkMode() error {
 // protected は、荒らしとして扱ってはいけない人 (信頼する人・op)。
 func (g *Guard) protected(name string) bool {
 	l := strings.ToLower(name)
-	return g.cfg.TrustedPlayers[l] || LoadOps(g.cfg.OpsFile)[l]
+	return g.cfg.DetectConfig.TrustedPlayers[l] || LoadOps(g.cfg.DetectConfig.OpsFile)[l]
 }
 
 // ctlRE は、制御文字と、行を分ける文字。コンソールの 1 行にも、Discord の 1 行にも入れない。
@@ -170,8 +170,8 @@ func (g *Guard) ReportIncident(ctx context.Context, id, by, note string) (*Recor
 	if rec.RolledBack && g.reporter.tagID != "" {
 		tags = append(tags, g.reporter.tagID)
 	}
-	if rec.Muted && g.cfg.ChatMuteTagID != "" {
-		tags = append(tags, g.cfg.ChatMuteTagID)
+	if rec.Muted && g.cfg.ChatConfig.ChatMuteTagID != "" {
+		tags = append(tags, g.cfg.ChatConfig.ChatMuteTagID)
 	}
 	thread, err := g.reporter.PostTags(ctx, existing, safeChat(rec.Name, 90), text, files, tags)
 	if err != nil {
@@ -304,11 +304,11 @@ func (g *Guard) runRollback(ctx context.Context, rec *Record) (string, error) {
 
 	user := UserInfo{ID: rec.UserID, Name: rec.Name, UUID: rec.UUID}
 	stats, serr := g.cp.Stats(ctx, user, rec.Start-2, rec.End)
-	if serr != nil || stats.Empty() || g.shooter == nil || g.cfg.MapIDs[stats.World] == "" {
+	if serr != nil || stats.Empty() || g.shooter == nil || g.cfg.ShotConfig.MapIDs[stats.World] == "" {
 		return note, nil
 	}
 	out := filepath.Join(g.reportDir(rec.ID), "restored.png")
-	got := g.bluemapShot(ctx, g.cfg.MapIDs[stats.World], stats, CamFor(stats), out,
+	got := g.bluemapShot(ctx, g.cfg.ShotConfig.MapIDs[stats.World], stats, CamFor(stats), out,
 		AnnotFor(stats, fmt.Sprintf("%s  RESTORED (rollback done)", stats.User.Name), "yellow = affected area", false), true)
 	if got != "" {
 		_, _ = g.update(rec.ID, func(r *Record) error {
@@ -330,11 +330,11 @@ func (g *Guard) Mute(ctx context.Context, name, by, reason string) error {
 	if err := g.checkMode(); err != nil {
 		return err
 	}
-	cmd := MuteCommand(g.cfg.ChatMuteCmd, name)
+	cmd := MuteCommand(g.cfg.ChatConfig.ChatMuteCmd, name)
 	switch {
 	case g.ops == nil:
 		return fmt.Errorf("%w: Minecraft のコンソールにつなげない設定です", ErrUnavailable)
-	case strings.TrimSpace(g.cfg.ChatMuteCmd) == "":
+	case strings.TrimSpace(g.cfg.ChatConfig.ChatMuteCmd) == "":
 		return fmt.Errorf("%w: CHAT_MUTE_CMD が空なので、ミュートできません", ErrUnavailable)
 	case cmd == "":
 		return fmt.Errorf("%w: 名前 %q はコンソールに安全に渡せません", ErrForbidden, name)

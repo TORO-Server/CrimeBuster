@@ -21,18 +21,18 @@ const (
 	ModeLive    Mode = "live"
 )
 
-type Config struct {
-	Mode Mode
-
-	// CoreProtect (TiDB)
+// DBConfig は CoreProtect (TiDB) への接続。
+type DBConfig struct {
 	DBHost      string
 	DBPort      string
 	DBUser      string
 	DBPassword  string
 	DBName      string
 	TablePrefix string
+}
 
-	// 検知の閾値
+// DetectConfig はブロック変更の検知の閾値。
+type DetectConfig struct {
 	BurstWindow     time.Duration // この秒数のあいだに
 	BreakBurst      int           // これ以上壊したら
 	PlaceBurst      int           // これ以上置いたら
@@ -45,8 +45,10 @@ type Config struct {
 	OpsFile         string // op の一覧 (ops.json)。op も信頼する人として扱う
 	PollInterval    time.Duration
 	MaxEventAge     time.Duration // これより古い行は、見ても報告しない (止まっていたあいだのもの)
+}
 
-	// チャットのスパム (CoreProtect の chat の表)
+// ChatConfig はチャットのスパム (CoreProtect の chat の表) の検知。
+type ChatConfig struct {
 	ChatEnabled      bool
 	ChatRate         int           // この数以上の発言を
 	ChatRateWindow   time.Duration // この時間のうちにしたら (連投)
@@ -58,16 +60,20 @@ type Config struct {
 	ChatQuiet        time.Duration // 発言が止まって、この時間たったら通報する
 	ChatMuteCmd      string        // 例: "mute {name} 10m spam"。空なら、ミュートはしない (live だけ)
 	ChatMuteTagID    string        // ミュートしたときに、投稿に付けるタグ (空なら付けない)
+}
 
-	// AI (Claude の Messages API)。キーが無ければ、AI は使わない
+// AIConfig は AI (Claude の Messages API)。キーが無ければ、AI は使わない。
+type AIConfig struct {
 	AIKey      string
 	AIBaseURL  string
 	AIModel    string
 	AIMinConf  int  // この確からしさ (0〜100) 以上でないと、AI の判定を採らない
 	AIRequired bool // true なら、AI が「荒らし」と答えないかぎり、ロールバックしない (AI が使えないときも)
 	AIChat     bool // チャットの発言を AI にも見せる
+}
 
-	// Discord
+// DiscordConfig は Discord への通報と、Discord-MCP への接続。
+type DiscordConfig struct {
 	BotToken         string // DISCORD_BOT_TOKEN (または _FILE)。空なら DiscordSRVConfig から読む
 	DiscordSRVConfig string
 	ReportChannelID  string
@@ -75,12 +81,16 @@ type Config struct {
 	DiscordMCPURL    string // Discord-MCP (Streamable HTTP) の /mcp
 	DiscordMCPLazy   bool   // サーバーが DISCORD_MCP_LAZY_TOOLS=true (discord_call_tool 1 本) か
 	MCPProtocol      string // Mcp-Protocol-Version
+}
 
-	// Minecraft のコンソール (中継の crime-buster console-relay に頼む。Docker のソケットは持たない)
+// ConsoleConfig は Minecraft のコンソール (中継の crime-buster console-relay に頼む。Docker のソケットは持たない)。
+type ConsoleConfig struct {
 	ConsoleURL  string
 	KickEnabled bool
+}
 
-	// BlueMap の画面
+// ShotConfig は BlueMap の画面の撮影。
+type ShotConfig struct {
 	BlueMapURL     string // 例: http://3d-map.torosaba.net
 	BrowserURL     string // 別のコンテナのブラウザ (例: ws://toro-chrome:9222)。空なら、ローカルの Chromium を起動する (開発用)
 	BlueMapResolve string // ローカルの Chromium だけ。例: toro-edge:80 (Host の名前をこの先に向ける)。空ならそのまま
@@ -89,19 +99,45 @@ type Config struct {
 	ShotWidth      int
 	ShotHeight     int
 	ShotSettle     time.Duration
+}
 
-	// 操作のためのコネクタ (TORO-MCP が、Admin 以上の人の頼みを、その人のトークンのまま取り次ぐ)。内部のネットワークだけに出す。
-	// 認証は OAuth 2.0 のトークン: auth の introspection (/introspect) に尋ね、いまの Discord のロールが AdminRoles のどれかであること。
-	// ControlAddr が空ならコネクタは開かない
+// ConnectorConfig は操作のためのコネクタ (TORO-MCP が、Admin 以上の人の頼みを、その人のトークンのまま取り次ぐ)。内部のネットワークだけに出す。
+// 認証は OAuth 2.0 のトークン: auth の introspection (/introspect) に尋ね、いまの Discord のロールが AdminRoles のどれかであること。
+// ControlAddr が空ならコネクタは開かない。
+type ConnectorConfig struct {
 	ControlAddr      string
 	AuthInternalURL  string   // auth の introspection の接続先 (内部のネットワークだけ)
 	AdminRoles       []string // コネクタを使える Discord のロールの ID (Owner と Admin)
 	RequireLiveRoles bool     // true なら、auth がいまの Discord で確かめたロール (roles_source=live) だけを信じる
 	DiscordAllow     string   // コネクタから呼んでよい Discord のツール名の正規表現
+}
 
-	WarpsDir        string
-	DataDir         string
+// StorageConfig はファイルの保存先。
+type StorageConfig struct {
+	WarpsDir string
+	DataDir  string
+}
+
+// RetentionConfig はデータの保持。
+type RetentionConfig struct {
 	ReportRetention time.Duration // 事件のフォルダを残す長さ。0 なら消さない
+}
+
+// Config は環境変数から読んだ設定。用途別のグループに分かれており、
+// 検証は Validate (validate.go) に集約されている。
+type Config struct {
+	Mode Mode
+
+	DBConfig
+	DetectConfig
+	ChatConfig
+	AIConfig
+	DiscordConfig
+	ConsoleConfig
+	ShotConfig
+	ConnectorConfig
+	StorageConfig
+	RetentionConfig
 }
 
 func loadConfig() (*Config, error) {
@@ -118,72 +154,90 @@ func loadConfig() (*Config, error) {
 		return nil, err
 	}
 	c := &Config{
-		Mode:             Mode(envStr("CRIMEBUSTER_MODE", "observe")),
-		DBHost:           envStr("DB_HOST", "tidb"),
-		DBPort:           envStr("DB_PORT", "4000"),
-		DBUser:           envStr("DB_USER", "root"),
-		DBPassword:       dbPassword,
-		DBName:           envStr("DB_NAME", "coreprotect"),
-		TablePrefix:      envStr("DB_TABLE_PREFIX", "coreprotect_"),
-		BurstWindow:      envDur("BURST_WINDOW", 5*time.Second),
-		BreakBurst:       envInt("BREAK_BURST", 100),
-		PlaceBurst:       envInt("PLACE_BURST", 150),
-		SustainedWindow:  envDur("SUSTAINED_WINDOW", 10*time.Minute),
-		SustainedBreaks:  envInt("SUSTAINED_BREAKS", 1500),
-		Quiet:            envDur("QUIET", 90*time.Second),
-		MaxIncident:      envDur("MAX_INCIDENT", 10*time.Minute),
-		WEGrace:          envDur("WE_GRACE", 30*time.Minute),
-		TrustedPlayers:   lowerSet(os.Getenv("TRUSTED_PLAYERS")),
-		OpsFile:          os.Getenv("OPS_FILE"),
-		PollInterval:     envDur("POLL_INTERVAL", 3*time.Second),
-		MaxEventAge:      envDur("MAX_EVENT_AGE", 15*time.Minute),
-		AIKey:            aiKey,
-		AIBaseURL:        envStr("AI_BASE_URL", "https://api.anthropic.com"),
-		AIModel:          envStr("AI_MODEL", "claude-haiku-5-5"),
-		AIMinConf:        envInt("AI_MIN_CONFIDENCE", 70),
-		AIRequired:       envBool("AI_REQUIRED", false),
-		AIChat:           envBool("AI_CHAT", true),
-		ChatEnabled:      envBool("CHAT_ENABLED", true),
-		ChatRate:         envInt("CHAT_RATE", 12),
-		ChatRateWindow:   envDur("CHAT_RATE_WINDOW", 10*time.Second),
-		ChatRepeat:       envInt("CHAT_REPEAT", 5),
-		ChatRepeatWindow: envDur("CHAT_REPEAT_WINDOW", 60*time.Second),
-		ChatRun:          envInt("CHAT_RUN", 30),
-		ChatLinkRepeat:   envInt("CHAT_LINK_REPEAT", 3),
-		ChatBadWordsFile: os.Getenv("CHAT_BAD_WORDS_FILE"),
-		ChatQuiet:        envDur("CHAT_QUIET", 30*time.Second),
-		ChatMuteCmd:      os.Getenv("CHAT_MUTE_CMD"),
-		ChatMuteTagID:    os.Getenv("CHAT_MUTE_TAG_ID"),
-		BotToken:         botToken,
-		DiscordSRVConfig: envStr("DISCORDSRV_CONFIG", "/discordsrv/config.yml"),
-		ReportChannelID:  envStr("REPORT_CHANNEL_ID", ""),
-		RollbackTagID:    envStr("ROLLBACK_TAG_ID", ""),
-		DiscordMCPURL:    envStr("DISCORD_MCP_URL", "http://discord-mcp:8085/mcp"),
-		DiscordMCPLazy:   envBool("DISCORD_MCP_LAZY", true),
-		MCPProtocol:      envStr("MCP_PROTOCOL_VERSION", "2025-11-25"),
-		ConsoleURL:       envStr("CONSOLE_URL", "http://toro-console:8091"),
-		KickEnabled:      envBool("KICK_ENABLED", false),
-		BlueMapURL:       envStr("BLUEMAP_URL", "http://3d-map.torosaba.net"),
-		BrowserURL:       strings.TrimSpace(os.Getenv("BROWSER_URL")),
-		BlueMapResolve:   os.Getenv("BLUEMAP_RESOLVE"),
-		MapIDs:           parseMap(envStr("MAP_IDS", "main=overworld")),
-		ChromePath:       os.Getenv("CHROME_PATH"),
-		ShotWidth:        envInt("SHOT_WIDTH", 1280),
-		ShotHeight:       envInt("SHOT_HEIGHT", 720),
-		ShotSettle:       envDur("SHOT_SETTLE", 60*time.Second),
-		ControlAddr:      envStr("CONTROL_ADDR", ":8090"),
-		AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", "http://toro-auth:8081"), "/"),
-		AdminRoles:       splitList(envStr("ADMIN_ROLE_IDS", "")),
-		RequireLiveRoles: envBool("CONTROL_REQUIRE_LIVE_ROLES", true),
-		DiscordAllow:     envStr("CONTROL_DISCORD_ALLOW", defaultDiscordAllow),
-		WarpsDir:         os.Getenv("WARPS_DIR"),
-		DataDir:          envStr("DATA_DIR", "/data"),
-		ReportRetention:  envDur("REPORT_RETENTION", 90*24*time.Hour),
+		Mode: Mode(envStr("CRIMEBUSTER_MODE", "observe")),
+		DBConfig: DBConfig{
+			DBHost:      envStr("DB_HOST", "tidb"),
+			DBPort:      envStr("DB_PORT", "4000"),
+			DBUser:      envStr("DB_USER", "root"),
+			DBPassword:  dbPassword,
+			DBName:      envStr("DB_NAME", "coreprotect"),
+			TablePrefix: envStr("DB_TABLE_PREFIX", "coreprotect_"),
+		},
+		DetectConfig: DetectConfig{
+			BurstWindow:     envDur("BURST_WINDOW", 5*time.Second),
+			BreakBurst:      envInt("BREAK_BURST", 100),
+			PlaceBurst:      envInt("PLACE_BURST", 150),
+			SustainedWindow: envDur("SUSTAINED_WINDOW", 10*time.Minute),
+			SustainedBreaks: envInt("SUSTAINED_BREAKS", 1500),
+			Quiet:           envDur("QUIET", 90*time.Second),
+			MaxIncident:     envDur("MAX_INCIDENT", 10*time.Minute),
+			WEGrace:         envDur("WE_GRACE", 30*time.Minute),
+			TrustedPlayers:  lowerSet(envStr("TRUSTED_PLAYERS", "")),
+			OpsFile:         envStr("OPS_FILE", ""),
+			PollInterval:    envDur("POLL_INTERVAL", 3*time.Second),
+			MaxEventAge:     envDur("MAX_EVENT_AGE", 15*time.Minute),
+		},
+		ChatConfig: ChatConfig{
+			ChatEnabled:      envBool("CHAT_ENABLED", true),
+			ChatRate:         envInt("CHAT_RATE", 12),
+			ChatRateWindow:   envDur("CHAT_RATE_WINDOW", 10*time.Second),
+			ChatRepeat:       envInt("CHAT_REPEAT", 5),
+			ChatRepeatWindow: envDur("CHAT_REPEAT_WINDOW", 60*time.Second),
+			ChatRun:          envInt("CHAT_RUN", 30),
+			ChatLinkRepeat:   envInt("CHAT_LINK_REPEAT", 3),
+			ChatBadWordsFile: envStr("CHAT_BAD_WORDS_FILE", ""),
+			ChatQuiet:        envDur("CHAT_QUIET", 30*time.Second),
+			ChatMuteCmd:      envStr("CHAT_MUTE_CMD", ""),
+			ChatMuteTagID:    envStr("CHAT_MUTE_TAG_ID", ""),
+		},
+		AIConfig: AIConfig{
+			AIKey:      aiKey,
+			AIBaseURL:  envStr("AI_BASE_URL", "https://api.anthropic.com"),
+			AIModel:    envStr("AI_MODEL", "claude-haiku-5-5"),
+			AIMinConf:  envInt("AI_MIN_CONFIDENCE", 70),
+			AIRequired: envBool("AI_REQUIRED", false),
+			AIChat:     envBool("AI_CHAT", true),
+		},
+		DiscordConfig: DiscordConfig{
+			BotToken:         botToken,
+			DiscordSRVConfig: envStr("DISCORDSRV_CONFIG", "/discordsrv/config.yml"),
+			ReportChannelID:  envStr("REPORT_CHANNEL_ID", ""),
+			RollbackTagID:    envStr("ROLLBACK_TAG_ID", ""),
+			DiscordMCPURL:    envStr("DISCORD_MCP_URL", "http://discord-mcp:8085/mcp"),
+			DiscordMCPLazy:   envBool("DISCORD_MCP_LAZY", true),
+			MCPProtocol:      envStr("MCP_PROTOCOL_VERSION", "2025-11-25"),
+		},
+		ConsoleConfig: ConsoleConfig{
+			ConsoleURL:  envStr("CONSOLE_URL", "http://toro-console:8091"),
+			KickEnabled: envBool("KICK_ENABLED", false),
+		},
+		ShotConfig: ShotConfig{
+			BlueMapURL:     envStr("BLUEMAP_URL", "http://3d-map.torosaba.net"),
+			BrowserURL:     envStr("BROWSER_URL", ""),
+			BlueMapResolve: envStr("BLUEMAP_RESOLVE", ""),
+			MapIDs:         parseMap(envStr("MAP_IDS", "main=overworld")),
+			ChromePath:     envStr("CHROME_PATH", ""),
+			ShotWidth:      envInt("SHOT_WIDTH", 1280),
+			ShotHeight:     envInt("SHOT_HEIGHT", 720),
+			ShotSettle:     envDur("SHOT_SETTLE", 60*time.Second),
+		},
+		ConnectorConfig: ConnectorConfig{
+			ControlAddr:      envStr("CONTROL_ADDR", ":8090"),
+			AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", "http://toro-auth:8081"), "/"),
+			AdminRoles:       splitList(envStr("ADMIN_ROLE_IDS", "")),
+			RequireLiveRoles: envBool("CONTROL_REQUIRE_LIVE_ROLES", true),
+			DiscordAllow:     envStr("CONTROL_DISCORD_ALLOW", defaultDiscordAllow),
+		},
+		StorageConfig: StorageConfig{
+			WarpsDir: envStr("WARPS_DIR", ""),
+			DataDir:  envStr("DATA_DIR", "/data"),
+		},
+		RetentionConfig: RetentionConfig{
+			ReportRetention: envDur("REPORT_RETENTION", 90*24*time.Hour),
+		},
 	}
-	switch c.Mode {
-	case ModeObserve, ModeDryRun, ModeReview, ModeLive:
-	default:
-		return nil, fmt.Errorf("CRIMEBUSTER_MODE must be observe, dry-run, review or live: %q", c.Mode)
+	if err := c.Validate(); err != nil {
+		return nil, err
 	}
 	return c, nil
 }
