@@ -57,11 +57,11 @@ type Record struct {
 	Trigger string `json:"trigger"`
 
 	State      IncidentState `json:"state"`
-	Busy       string          `json:"busy,omitempty"` // 裏で動いている操作 (rollback)
-	Reported   bool            `json:"reported"`
-	Thread     string          `json:"thread,omitempty"`
-	RolledBack bool            `json:"rolled_back"`
-	Muted      bool            `json:"muted,omitempty"`
+	Busy       string        `json:"busy,omitempty"` // 裏で動いている操作 (rollback)
+	Reported   bool          `json:"reported"`
+	Thread     string        `json:"thread,omitempty"`
+	RolledBack bool          `json:"rolled_back"`
+	Muted      bool          `json:"muted,omitempty"`
 
 	Images      []string `json:"images,omitempty"` // 同じフォルダの中のファイル名
 	Breaks      int      `json:"breaks,omitempty"`
