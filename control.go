@@ -64,11 +64,11 @@ type Control struct {
 }
 
 func NewControl(base context.Context, g *Guard) (*Control, error) {
-	re, err := regexp.Compile(g.cfg.DiscordAllow)
+	re, err := regexp.Compile(g.cfg.ConnectorConfig.DiscordAllow)
 	if err != nil {
 		return nil, fmt.Errorf("CONTROL_DISCORD_ALLOW: %w", err)
 	}
-	return &Control{g: g, authz: NewAuthz(g.cfg), allow: re, base: base, log: g.log, audit: filepath.Join(g.cfg.DataDir, "audit.jsonl"), shots: map[string]*shotJob{}}, nil
+	return &Control{g: g, authz: NewAuthz(g.cfg), allow: re, base: base, log: g.log, audit: filepath.Join(g.cfg.StorageConfig.DataDir, "audit.jsonl"), shots: map[string]*shotJob{}}, nil
 }
 
 // Handler はコネクタの HTTP API の全部の経路。
@@ -226,7 +226,7 @@ func (c *Control) status(r *http.Request) (*result, error) {
 		"mode": g.cfg.Mode, "version": version, "now": time.Now().Unix(),
 		"pending": len(pending), "open_incidents": active,
 		"can_act": CapabilitiesFor(g.cfg.Mode).AcceptOps, "can_post": g.reporter != nil,
-		"can_rollback": g.ops != nil && CapabilitiesFor(g.cfg.Mode).AcceptOps, "can_mute": strings.TrimSpace(g.cfg.ChatMuteCmd) != "",
+		"can_rollback": g.ops != nil && CapabilitiesFor(g.cfg.Mode).AcceptOps, "can_mute": strings.TrimSpace(g.cfg.ChatConfig.ChatMuteCmd) != "",
 		"can_screenshot": g.shooter != nil, "ai": g.ai != nil,
 	}}, nil
 }
@@ -502,7 +502,7 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 	if world == "" {
 		world = "main"
 	}
-	mapID := g.cfg.MapIDs[world]
+	mapID := g.cfg.ShotConfig.MapIDs[world]
 	if mapID == "" {
 		return nil, badRequest("world %q の地図が設定にありません", world)
 	}
@@ -550,7 +550,7 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 		defer g.opMu.Unlock()
 		ctx, cancel := context.WithTimeout(c.base, 3*time.Minute)
 		defer cancel()
-		dir := filepath.Join(g.cfg.DataDir, "shots")
+		dir := filepath.Join(g.cfg.StorageConfig.DataDir, "shots")
 		out := filepath.Join(dir, id+".png")
 		err := os.MkdirAll(dir, 0o755)
 		if err == nil {

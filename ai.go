@@ -43,10 +43,10 @@ type ChatFlag struct {
 }
 
 func NewAI(cfg *Config) *AI {
-	if cfg.AIKey == "" {
+	if cfg.AIConfig.AIKey == "" {
 		return nil
 	}
-	return &AI{key: cfg.AIKey, model: cfg.AIModel, base: strings.TrimRight(cfg.AIBaseURL, "/"), hc: &http.Client{Timeout: 90 * time.Second}}
+	return &AI{key: cfg.AIConfig.AIKey, model: cfg.AIConfig.AIModel, base: strings.TrimRight(cfg.AIConfig.AIBaseURL, "/"), hc: &http.Client{Timeout: 90 * time.Second}}
 }
 
 type aiResp struct {

@@ -56,7 +56,7 @@ const (
 func NewGuard(cfg *Config, cp *CP, st *Store, ops *Ops, sh *Shooter, rep *Reporter, log *slog.Logger) *Guard {
 	return &Guard{
 		cfg: cfg, cp: cp, det: NewDetector(cfg), cdet: NewChatDetector(cfg), ai: NewAI(cfg), store: st, ops: ops, shooter: sh, reporter: rep,
-		warps: LoadWarps(cfg.WarpsDir), log: log,
+		warps: LoadWarps(cfg.StorageConfig.WarpsDir), log: log,
 		suppressed: map[int]int64{}, queue: make(chan *Incident, 16), busy: map[string]string{},
 		refreshEvery: refreshInterval, rollbackConfirmWait: 5 * time.Second,
 	}
@@ -84,7 +84,7 @@ func (g *Guard) Run(ctx context.Context) error {
 		g.mu.Unlock()
 		g.log.Info("起動: 今ある最後の行から見る", "cursor", n)
 	}
-	if g.cfg.ChatEnabled && g.store.S.ChatCur == 0 {
+	if g.cfg.ChatConfig.ChatEnabled && g.store.S.ChatCur == 0 {
 		n, err := g.cp.MaxChatRowID(ctx)
 		if err != nil {
 			return fmt.Errorf("max chat rowid: %w", err)
@@ -104,7 +104,7 @@ func (g *Guard) Run(ctx context.Context) error {
 	go g.worker(ctx)
 	go g.sweepLoop(ctx)
 
-	tick := time.NewTicker(g.cfg.PollInterval)
+	tick := time.NewTicker(g.cfg.DetectConfig.PollInterval)
 	defer tick.Stop()
 	var healthAt time.Time
 	for {
@@ -135,7 +135,7 @@ func (g *Guard) step(ctx context.Context) error {
 		g.mu.Lock()
 		for _, e := range events {
 			g.store.S.Cursor = e.RowID
-			if now-e.Time > int64(g.cfg.MaxEventAge.Seconds()) { // 古い行 (止まっていたあいだのもの) は、見ても報告しない
+			if now-e.Time > int64(g.cfg.DetectConfig.MaxEventAge.Seconds()) { // 古い行 (止まっていたあいだのもの) は、見ても報告しない
 				continue
 			}
 			g.onEvent(ctx, e)
@@ -145,7 +145,7 @@ func (g *Guard) step(ctx context.Context) error {
 			break
 		}
 	}
-	if g.cfg.ChatEnabled {
+	if g.cfg.ChatConfig.ChatEnabled {
 		if err := g.stepChat(ctx); err != nil {
 			g.log.Error("チャットの監視が失敗", "err", err)
 		}
@@ -168,7 +168,7 @@ func (g *Guard) stepChat(ctx context.Context) error {
 		g.mu.Lock()
 		for _, m := range msgs {
 			g.store.S.ChatCur = m.RowID
-			if now-m.Time > int64(g.cfg.MaxEventAge.Seconds()) {
+			if now-m.Time > int64(g.cfg.DetectConfig.MaxEventAge.Seconds()) {
 				continue
 			}
 			g.onChat(ctx, m, flags[m.RowID])
@@ -186,12 +186,12 @@ const maxAIChatBatch = 40
 // aiChat は、新しい発言を AI に見せて、対応すべき発言 (rowid → 判定) を返す。AI を使わない・失敗したときは空。
 // 発言が多い (起動直後に溜まっていたときなど) ときは、新しいほうから maxAIChatBatch 件だけ見せる。
 func (g *Guard) aiChat(ctx context.Context, msgs []ChatMsg, now int64) map[int64]*ChatFlag {
-	if g.ai == nil || !g.cfg.AIChat {
+	if g.ai == nil || !g.cfg.AIConfig.AIChat {
 		return nil
 	}
 	var fresh []ChatMsg
 	for _, m := range msgs {
-		if now-m.Time <= int64(g.cfg.MaxEventAge.Seconds()) && strings.TrimSpace(m.Msg) != "" {
+		if now-m.Time <= int64(g.cfg.DetectConfig.MaxEventAge.Seconds()) && strings.TrimSpace(m.Msg) != "" {
 			fresh = append(fresh, m)
 		}
 	}
@@ -219,7 +219,7 @@ func (g *Guard) aiChat(ctx context.Context, msgs []ChatMsg, now int64) map[int64
 		}
 		for i := range list {
 			f := list[i]
-			if f.Confidence < g.cfg.AIMinConf {
+			if f.Confidence < g.cfg.AIConfig.AIMinConf {
 				continue
 			}
 			out[part[f.ID].RowID] = &f
@@ -268,7 +268,7 @@ func (g *Guard) onChat(ctx context.Context, m ChatMsg, flag *ChatFlag) {
 		return
 	}
 	lname := strings.ToLower(u.Name)
-	if g.cfg.TrustedPlayers[lname] || LoadOps(g.cfg.OpsFile)[lname] {
+	if g.cfg.DetectConfig.TrustedPlayers[lname] || LoadOps(g.cfg.DetectConfig.OpsFile)[lname] {
 		g.suppressed[-m.User] = m.Time + 3600 // チャットは、ブロックと別に数える (鍵を負の数にする)
 		g.log.Info("チャットのスパムを検知したが対象外", "player", u.Name, "trigger", t.String())
 		return
@@ -314,15 +314,15 @@ func (g *Guard) consider(ctx context.Context, t Trigger, e Event) {
 		suppress("not a player", time.Hour)
 		return
 	}
-	if g.cfg.TrustedPlayers[strings.ToLower(u.Name)] {
+	if g.cfg.DetectConfig.TrustedPlayers[strings.ToLower(u.Name)] {
 		suppress("trusted", time.Hour)
 		return
 	}
-	if LoadOps(g.cfg.OpsFile)[strings.ToLower(u.Name)] {
+	if LoadOps(g.cfg.DetectConfig.OpsFile)[strings.ToLower(u.Name)] {
 		suppress("op", time.Hour)
 		return
 	}
-	cmd, err := g.cp.RecentEditCommand(ctx, t.User, e.Time-int64(g.cfg.WEGrace.Seconds()))
+	cmd, err := g.cp.RecentEditCommand(ctx, t.User, e.Time-int64(g.cfg.DetectConfig.WEGrace.Seconds()))
 	if err != nil {
 		g.log.Error("コマンドの確認に失敗", "err", err)
 	}
@@ -344,7 +344,7 @@ func (g *Guard) consider(ctx context.Context, t Trigger, e Event) {
 	g.store.S.Incidents[fmt.Sprint(t.User)] = inc
 	g.log.Warn("荒らしを検知", "player", u.Name, "uuid", u.UUID, "trigger", trigger, "incident", inc.ID, "mode", g.cfg.Mode)
 
-	if CapabilitiesFor(g.cfg.Mode).AutoKick && g.cfg.KickEnabled && g.ops != nil {
+	if CapabilitiesFor(g.cfg.Mode).AutoKick && g.cfg.ConsoleConfig.KickEnabled && g.ops != nil {
 		go g.kickDetected(ctx, u.Name) // g.mu を持ったままコンソールを待たない
 	}
 }
@@ -363,12 +363,12 @@ func (g *Guard) closeIdle(now int64) {
 		if inc.Queued {
 			continue
 		}
-		quietFor := g.cfg.Quiet
+		quietFor := g.cfg.DetectConfig.Quiet
 		if inc.Kind == "chat" {
-			quietFor = g.cfg.ChatQuiet
+			quietFor = g.cfg.ChatConfig.ChatQuiet
 		}
 		quiet := now-inc.Last >= int64(quietFor.Seconds())
-		long := now-inc.Start >= int64(g.cfg.MaxIncident.Seconds())
+		long := now-inc.Start >= int64(g.cfg.DetectConfig.MaxIncident.Seconds())
 		if !quiet && !long {
 			continue
 		}
@@ -456,12 +456,12 @@ func (g *Guard) processWindow(ctx context.Context, inc *Incident, end int64) (*R
 	if stats.Empty() {
 		return nil, fmt.Errorf("no block changes found for %s", inc.Name)
 	}
-	dir := filepath.Join(g.cfg.DataDir, "reports", inc.ID)
+	dir := filepath.Join(g.cfg.StorageConfig.DataDir, "reports", inc.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
 	res := &Result{Dir: dir, Stats: stats}
-	mapID := g.cfg.MapIDs[stats.World]
+	mapID := g.cfg.ShotConfig.MapIDs[stats.World]
 
 	// 1. 証拠の絵 (BlueMap が使えなくても作れる、真上からの図)
 	heat := filepath.Join(dir, "heatmap.png")
@@ -506,9 +506,9 @@ func (g *Guard) processWindow(ctx context.Context, inc *Incident, end int64) (*R
 	// AI が「荒らしではない」「確信が低い」と答えたら、ロールバックしない (通報はして、運営が見る)。
 	// AI が使えないときは、AI_REQUIRED=true でなければ、閾値の決まりだけで進める
 	switch {
-	case g.ai != nil && out.AI != nil && !out.AI.Allows(g.cfg.AIMinConf):
-		out.Skipped = fmt.Sprintf("AI の判定が「%s」(確からしさ %d%%) で、基準 %d%% の「荒らし」に届かない", verdictJP(out.AI.Verdict), out.AI.Confidence, g.cfg.AIMinConf)
-	case g.cfg.AIRequired && out.AI == nil:
+	case g.ai != nil && out.AI != nil && !out.AI.Allows(g.cfg.AIConfig.AIMinConf):
+		out.Skipped = fmt.Sprintf("AI の判定が「%s」(確からしさ %d%%) で、基準 %d%% の「荒らし」に届かない", verdictJP(out.AI.Verdict), out.AI.Confidence, g.cfg.AIConfig.AIMinConf)
+	case g.cfg.AIConfig.AIRequired && out.AI == nil:
 		out.Skipped = "AI の判定が得られない (AI_REQUIRED=true)"
 	case now-inc.Start > maxRollbackAge:
 		out.Skipped = "事件から 24 時間より長くたっている"

@@ -35,14 +35,14 @@ func OpenCP(c *Config) (*CP, error) {
 	q.Set("timeout", "10s")
 	q.Set("readTimeout", "60s")
 	q.Set("tidb_mem_quota_query", "2147483648")
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", c.DBUser, c.DBPassword, c.DBHost, c.DBPort, c.DBName, q.Encode())
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?%s", c.DBConfig.DBUser, c.DBConfig.DBPassword, c.DBConfig.DBHost, c.DBConfig.DBPort, c.DBConfig.DBName, q.Encode())
 	db, err := sql.Open("mysql", dsn)
 	if err != nil {
 		return nil, err
 	}
 	db.SetMaxOpenConns(4)
 	db.SetConnMaxLifetime(5 * time.Minute)
-	return &CP{db: db, p: c.TablePrefix, users: map[int]UserInfo{}, worlds: map[int]string{}, mats: map[int]string{}}, nil
+	return &CP{db: db, p: c.DBConfig.TablePrefix, users: map[int]UserInfo{}, worlds: map[int]string{}, mats: map[int]string{}}, nil
 }
 
 func (c *CP) Close() error { return c.db.Close() }

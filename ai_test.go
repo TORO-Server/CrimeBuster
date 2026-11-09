@@ -27,7 +27,7 @@ func fakeClaude(t *testing.T, answer string, got *map[string]any, hdr *http.Head
 		_ = json.NewEncoder(w).Encode(map[string]any{"content": []map[string]any{{"type": "text", "text": answer}}})
 	}))
 	t.Cleanup(srv.Close)
-	return NewAI(&Config{AIKey: "k-test", AIModel: "claude-haiku-5-5", AIBaseURL: srv.URL})
+	return NewAI(&Config{AIConfig: AIConfig{AIKey: "k-test", AIModel: "claude-haiku-5-5", AIBaseURL: srv.URL}})
 }
 
 func TestNewAIWithoutKeyIsNil(t *testing.T) {
@@ -90,7 +90,7 @@ func TestAIAPIError(t *testing.T) {
 		_, _ = w.Write([]byte(`{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}`))
 	}))
 	defer srv.Close()
-	ai := NewAI(&Config{AIKey: "bad", AIModel: "m", AIBaseURL: srv.URL})
+	ai := NewAI(&Config{AIConfig: AIConfig{AIKey: "bad", AIModel: "m", AIBaseURL: srv.URL}})
 	_, err := ai.ReviewIncident(context.Background(), &Stats{}, "x", nil)
 	if err == nil || !strings.Contains(err.Error(), "authentication_error") {
 		t.Fatalf("err=%v", err)

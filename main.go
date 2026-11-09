@@ -70,10 +70,10 @@ func cmdRun(log *slog.Logger) error {
 	if err := cp.Ping(ctx); err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
-	if cfg.DBUser == "root" {
+	if cfg.DBConfig.DBUser == "root" {
 		log.Warn("データベースに root でつないでいます。SELECT だけの専用のユーザーにしてください (DB_USER、DB_PASSWORD_FILE)")
 	}
-	st, err := OpenStore(cfg.DataDir)
+	st, err := OpenStore(cfg.StorageConfig.DataDir)
 	if err != nil {
 		return err
 	}
@@ -83,7 +83,7 @@ func cmdRun(log *slog.Logger) error {
 	var rep *Reporter
 	caps := CapabilitiesFor(cfg.Mode)
 	if caps.Capture {
-		ops = &Ops{C: NewRelayConsole(cfg.ConsoleURL)}
+		ops = &Ops{C: NewRelayConsole(cfg.ConsoleConfig.ConsoleURL)}
 		sh = NewShooter(cfg)
 	}
 	// 通報の部品は、自動で投稿する動かし方 (AutoReport) と、コネクタ経由の操作で投稿を受ける動かし方 (AcceptOps) で要る。
@@ -99,13 +99,13 @@ func cmdRun(log *slog.Logger) error {
 		log.Info("Discord に接続できる", "info", info)
 	}
 	g := NewGuard(cfg, cp, st, ops, sh, rep, log)
-	if cfg.ControlAddr != "" {
+	if cfg.ConnectorConfig.ControlAddr != "" {
 		ctl, err := NewControl(ctx, g)
 		if err != nil {
 			return err
 		}
 		go func() {
-			if err := ctl.Serve(ctx, cfg.ControlAddr); err != nil {
+			if err := ctl.Serve(ctx, cfg.ConnectorConfig.ControlAddr); err != nil {
 				log.Error("コネクタが止まった", "err", err)
 			}
 		}()
@@ -113,9 +113,9 @@ func cmdRun(log *slog.Logger) error {
 		log.Info("コネクタは開かない (CONTROL_ADDR が空)")
 	}
 	log.Info("起動", "version", version, "mode", cfg.Mode,
-		"burst", fmt.Sprintf("壊 %d / 置 %d / %s", cfg.BreakBurst, cfg.PlaceBurst, cfg.BurstWindow),
-		"sustained", fmt.Sprintf("壊 %d / %s", cfg.SustainedBreaks, cfg.SustainedWindow),
-		"trusted", len(cfg.TrustedPlayers), "warps", len(g.warps))
+		"burst", fmt.Sprintf("壊 %d / 置 %d / %s", cfg.DetectConfig.BreakBurst, cfg.DetectConfig.PlaceBurst, cfg.DetectConfig.BurstWindow),
+		"sustained", fmt.Sprintf("壊 %d / %s", cfg.DetectConfig.SustainedBreaks, cfg.DetectConfig.SustainedWindow),
+		"trusted", len(cfg.DetectConfig.TrustedPlayers), "warps", len(g.warps))
 	touchHealth(cfg)
 	return g.Run(ctx)
 }
@@ -143,7 +143,7 @@ func cmdCheck(log *slog.Logger, args []string) error {
 	if err != nil {
 		return fmt.Errorf("database: %w", err)
 	}
-	fmt.Printf("database: ok (%s:%s/%s, 最後の行 %d)\n", cfg.DBHost, cfg.DBPort, cfg.DBName, n)
+	fmt.Printf("database: ok (%s:%s/%s, 最後の行 %d)\n", cfg.DBConfig.DBHost, cfg.DBConfig.DBPort, cfg.DBConfig.DBName, n)
 
 	rep, err := reporterFor(cfg)
 	if err != nil {
@@ -162,12 +162,12 @@ func cmdCheck(log *slog.Logger, args []string) error {
 		if _, err := ai.ReviewChat(ctx, []ChatMsg{{Time: time.Now().Unix(), User: 1, Msg: "こんにちは"}}, map[int]string{1: "test"}); err != nil {
 			return fmt.Errorf("ai: %w", err)
 		}
-		fmt.Printf("ai: ok (%s)\n", cfg.AIModel)
+		fmt.Printf("ai: ok (%s)\n", cfg.AIConfig.AIModel)
 	}
 
 	if *console {
-		ops := Ops{C: NewRelayConsole(cfg.ConsoleURL)}
-		for _, mapID := range cfg.MapIDs {
+		ops := Ops{C: NewRelayConsole(cfg.ConsoleConfig.ConsoleURL)}
+		for _, mapID := range cfg.ShotConfig.MapIDs {
 			idle, err := ops.BlueMapIdle(ctx, mapID)
 			if err != nil {
 				return fmt.Errorf("console: %w", err)
@@ -175,7 +175,7 @@ func cmdCheck(log *slog.Logger, args []string) error {
 			fmt.Printf("console: ok (bluemap %s: 更新済みで待機中=%v)\n", mapID, idle)
 		}
 	}
-	fmt.Printf("mode=%s  warps=%d\n", cfg.Mode, len(LoadWarps(cfg.WarpsDir)))
+	fmt.Printf("mode=%s  warps=%d\n", cfg.Mode, len(LoadWarps(cfg.StorageConfig.WarpsDir)))
 	return nil
 }
 
@@ -204,7 +204,7 @@ func cmdReplay(log *slog.Logger, args []string) error {
 	}
 	cfg.Mode = ModeDryRun // replay は、どんなときも何も投稿せず、ロールバックもしない
 	abs, _ := filepath.Abs(*out)
-	cfg.DataDir = abs
+	cfg.StorageConfig.DataDir = abs
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
@@ -272,7 +272,7 @@ func cmdHealth(args []string) error {
 	if err != nil {
 		return err
 	}
-	return checkHealthFile(cfg.DataDir, time.Now())
+	return checkHealthFile(cfg.StorageConfig.DataDir, time.Now())
 }
 
 func checkHealthFile(dataDir string, now time.Time) error {
@@ -287,6 +287,6 @@ func checkHealthFile(dataDir string, now time.Time) error {
 }
 
 func touchHealth(cfg *Config) {
-	_ = os.MkdirAll(cfg.DataDir, 0o755)
-	_ = os.WriteFile(filepath.Join(cfg.DataDir, "health"), []byte(time.Now().Format(time.RFC3339)), 0o644)
+	_ = os.MkdirAll(cfg.StorageConfig.DataDir, 0o755)
+	_ = os.WriteFile(filepath.Join(cfg.StorageConfig.DataDir, "health"), []byte(time.Now().Format(time.RFC3339)), 0o644)
 }

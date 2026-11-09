@@ -56,17 +56,17 @@ type userWin struct {
 }
 
 func NewDetector(c *Config) *Detector {
-	burst := int(c.BurstWindow.Seconds())
+	burst := int(c.DetectConfig.BurstWindow.Seconds())
 	if burst < 1 {
 		burst = 1
 	}
-	sus := int(c.SustainedWindow.Seconds())
+	sus := int(c.DetectConfig.SustainedWindow.Seconds())
 	if sus < burst {
 		sus = burst
 	}
 	return &Detector{
 		burst: burst, sustained: sus,
-		breakBurst: c.BreakBurst, placeBurst: c.PlaceBurst, sustainedBreaks: c.SustainedBreaks,
+		breakBurst: c.DetectConfig.BreakBurst, placeBurst: c.DetectConfig.PlaceBurst, sustainedBreaks: c.DetectConfig.SustainedBreaks,
 		users: map[int]*userWin{},
 	}
 }
