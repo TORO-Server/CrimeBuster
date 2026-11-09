@@ -585,7 +585,11 @@ func (g *Guard) processWindow(ctx context.Context, inc *Incident, end int64) (*R
 		g.store.S.Threads[key] = ThreadRef{ThreadID: id, At: now}
 		_ = g.store.Save()
 		g.mu.Unlock()
-		rec.State, rec.Reported, rec.Thread = StateReported, true, id
+		// 作った直後で状態は pending。遷移できなければ、記録を書かずに中断する
+		if err := rec.Transition(StateReported); err != nil {
+			return res, err
+		}
+		rec.Thread = id
 		rec.decide(now, "crime-buster", "report", "")
 	}
 	if err := saveRecord(dir, rec); err != nil {
