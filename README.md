@@ -56,7 +56,7 @@ Muse など ──(OAuth 2.0 のトークン)──▶ mcp.torosaba.net ──(�
 | `POST /v1/screenshot` `GET /v1/screenshots/{job}` | 指定した場所の BlueMap の撮影を始める (202 と job) / 撮れた画像 (まだなら 202)。撮るのに 1 分ほどかかり、Muse の 1 回の呼び出しは 45 秒で切れるので、2 回に分けている |
 | `GET /v1/discord/tools` `POST /v1/discord/call` | 許可した Discord のツールだけ (`CONTROL_DISCORD_ALLOW`。読むことと、投稿・タグ付け。BAN・キック・ロール・削除は含めない)。チャンネルを指定するツールは、通報フォーラムとそのスレッドだけ。`discord_update_channel` はタグ (`applied_tags`) だけ。投稿の `allowed_mentions` は、呼ぶ側に関係なく「だれにも通知しない」にする |
 
-- **認証は OAuth 2.0 の Bearer トークン** (共有の秘密は無い)。`AUTH_INTERNAL_URL` の `/introspect` に尋ね、返ってきた**いまの Discord のロール** (`roles_source` が `live`) が `ADMIN_ROLE_IDS` (既定 Owner と Admin) のどれかなら通す。トークンが無効 → 401、Admin ではない → 403、auth に尋ねられない・ロールを確かめられない → 503。**コネクタは公開しない** (ports を付けない、トンネルに載せない)。
+- **認証は OAuth 2.0 の Bearer トークン** (共有の秘密は無い)。`AUTH_INTERNAL_URL` の `/introspect` に尋ね、返ってきた**いまの Discord のロール** (`roles_source` が `live`) が `ADMIN_ROLE_IDS` (環境変数で指定する。指定が無ければ、どのロールでも通さない) のどれかなら通す。トークンが無効 → 401、Admin ではない → 403、auth に尋ねられない・ロールを確かめられない → 503。**コネクタは公開しない** (ports を付けない、トンネルに載せない)。
 - **scope**: トークンに `scope` が無ければ (本人が auth で発行した 90 日トークン) 通す。`scope` があるとき (OAuth の同意の範囲) は、空白で区切った中に `mcp` という言葉が要る。無ければ 403。読み取りだけに同意したトークンでは、管理の操作はできない。
 - 頼んだ人は、トークンの持ち主 (Discord の ID と名前) で、操作 (GET 以外) はすべて `DATA_DIR/audit.jsonl` に 1 行ずつ残る。Discord の呼び出しは、ツール名・チャンネル・本文の SHA-256 も残す (本文そのものは残さない)。Discord の監査ログの理由は、頼んだ人の名前から始まる。
 - 操作を受けるのは、`review` と `live` のときだけ。信頼する人と op には、ロールバック・ミュート・キックをしない。名前や ID は、英数字と `_ .` だけを通し、コンソールの命令にならないようにしている。データベースから来た名前とワールド名も同じに確かめ、形が正しくなければコンソールに送らない (事件の ID には、名前の代わりにユーザーの番号を使う)。
@@ -206,7 +206,7 @@ GET  /healthz                                  204
 | `AI_MIN_CONFIDENCE` `AI_REQUIRED` `AI_CHAT` | 70 `false` `true` | AI の判定を採る確からしさ / AI が「荒らし」と言わないとロールバックしない / チャットも AI に見せる |
 | `CHAT_ENABLED` `CHAT_RATE` `CHAT_RATE_WINDOW` `CHAT_REPEAT` `CHAT_REPEAT_WINDOW` `CHAT_RUN` `CHAT_LINK_REPEAT` `CHAT_QUIET` | `true` 12 10s 5 60s 30 3 30s | チャットのスパムの閾値 |
 | `CHAT_BAD_WORDS_FILE` `CHAT_MUTE_CMD` `CHAT_MUTE_TAG_ID` | (空) (空) (空) | 禁止語の一覧 / ミュートのコマンド (`{name}`) / ミュートしたときのタグ |
-| `REPORT_CHANNEL_ID` `ROLLBACK_TAG_ID` | 通報フォーラム / 「ロルバ済」 | 通報先 |
+| `REPORT_CHANNEL_ID` `ROLLBACK_TAG_ID` | (無し。環境変数で指定) | 通報先フォーラム / 「ロルバ済」タグ |
 | `CONSOLE_URL` | `http://toro-console:8091` | コンソールの中継の場所 |
 | `KICK_ENABLED` | `false` | `live` で、検知したらすぐキックする |
 | `BROWSER_URL` | (空 = ローカルの Chromium を起動する。開発用) | 画面を撮るブラウザのコンテナ (例 `ws://toro-chrome:9222`) |

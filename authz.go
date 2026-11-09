@@ -49,10 +49,10 @@ type Authz struct {
 
 func NewAuthz(cfg *Config) *Authz {
 	admins := map[string]bool{}
-	for _, r := range cfg.AdminRoles {
+	for _, r := range cfg.ConnectorConfig.AdminRoles {
 		admins[r] = true
 	}
-	return &Authz{url: cfg.AuthInternalURL, admins: admins, requireLive: cfg.RequireLiveRoles, http: &http.Client{Timeout: introspectTimeout}}
+	return &Authz{url: cfg.ConnectorConfig.AuthInternalURL, admins: admins, requireLive: cfg.ConnectorConfig.RequireLiveRoles, http: &http.Client{Timeout: introspectTimeout}}
 }
 
 type authResult int

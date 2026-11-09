@@ -185,7 +185,7 @@ func NewShooter(c *Config) *Shooter {
 			flags = append(flags, f)
 		}
 	}
-	return &Shooter{URL: c.BlueMapURL, Browser: c.BrowserURL, Resolve: c.BlueMapResolve, Chrome: c.ChromePath, Flags: flags, W: c.ShotWidth, H: c.ShotHeight, MaxWait: c.ShotSettle}
+	return &Shooter{URL: c.ShotConfig.BlueMapURL, Browser: c.ShotConfig.BrowserURL, Resolve: c.ShotConfig.BlueMapResolve, Chrome: c.ShotConfig.ChromePath, Flags: flags, W: c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight, MaxWait: c.ShotConfig.ShotSettle}
 }
 
 // tilesLoadedJS は、いま見えている範囲のタイルが全部読み終わったか。

@@ -86,9 +86,12 @@ func newCtlEnv(t *testing.T, mode Mode) *ctlEnv {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := &Config{
-		Mode: mode, DataDir: dir, DiscordAllow: defaultDiscordAllow, AdminRoles: []string{"111111111111111111", adminRole}, RequireLiveRoles: true,
-		ChatMuteCmd: "mute {name} 10m spam", TrustedPlayers: map[string]bool{"trusty": true},
-		MapIDs: map[string]string{"main": "overworld"},
+		Mode:            mode,
+		StorageConfig:   StorageConfig{DataDir: dir},
+		ConnectorConfig: ConnectorConfig{DiscordAllow: defaultDiscordAllow, AdminRoles: []string{"111111111111111111", adminRole}, RequireLiveRoles: true},
+		ChatConfig:      ChatConfig{ChatMuteCmd: "mute {name} 10m spam"},
+		DetectConfig:    DetectConfig{TrustedPlayers: map[string]bool{"trusty": true}},
+		ShotConfig:      ShotConfig{MapIDs: map[string]string{"main": "overworld"}},
 	}
 	st, err := OpenStore(dir)
 	if err != nil {
@@ -226,7 +229,7 @@ func TestControlScopeWrongTypeFailsClosed(t *testing.T) {
 		_, _ = w.Write([]byte(`{"active":true,"claims":{"id":"1","roles":["` + adminRole + `"],"roles_source":"live","scope":["mcp"]}}`))
 	}))
 	defer auth.Close()
-	a := NewAuthz(&Config{AuthInternalURL: auth.URL, AdminRoles: []string{adminRole}, RequireLiveRoles: true})
+	a := NewAuthz(&Config{ConnectorConfig: ConnectorConfig{AuthInternalURL: auth.URL, AdminRoles: []string{adminRole}, RequireLiveRoles: true}})
 	if p, res, _ := a.Check(context.Background(), "tok"); p != nil || res != authUnavailable {
 		t.Fatalf("%v %v", p, res)
 	}

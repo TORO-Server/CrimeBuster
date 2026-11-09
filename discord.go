@@ -49,14 +49,14 @@ func NewReporter(mcp *MCP, token, channelID, rollbackTagID string) *Reporter {
 // reporterFor は設定から、ボットのトークンと Discord-MCP を使う Reporter を作る。
 // DISCORD_BOT_TOKEN (または _FILE) があれば、それを使う。無ければ DiscordSRV の config.yml から読む。
 func reporterFor(cfg *Config) (*Reporter, error) {
-	tok := cfg.BotToken
+	tok := cfg.DiscordConfig.BotToken
 	if tok == "" {
 		var err error
-		if tok, err = LoadBotToken(cfg.DiscordSRVConfig); err != nil {
+		if tok, err = LoadBotToken(cfg.DiscordConfig.DiscordSRVConfig); err != nil {
 			return nil, fmt.Errorf("discordsrv token: %w", err)
 		}
 	}
-	return NewReporter(NewMCP(cfg.DiscordMCPURL, cfg.MCPProtocol, cfg.DiscordMCPLazy), tok, cfg.ReportChannelID, cfg.RollbackTagID), nil
+	return NewReporter(NewMCP(cfg.DiscordConfig.DiscordMCPURL, cfg.DiscordConfig.MCPProtocol, cfg.DiscordConfig.DiscordMCPLazy), tok, cfg.DiscordConfig.ReportChannelID, cfg.DiscordConfig.RollbackTagID), nil
 }
 
 // noMentions は、投稿の allowed_mentions。文字に @everyone などがあっても、だれにも通知しない。
