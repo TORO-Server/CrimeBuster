@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crime-buster/internal/app"
-	"crime-buster/internal/config"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/notify"
 	"flag"
@@ -20,7 +19,7 @@ func cmdScan(log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("scan", flag.ExitOnError)
 	days := fs.Float64("days", 7, "さかのぼる日数")
 	_ = fs.Parse(args)
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}

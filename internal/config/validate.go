@@ -118,15 +118,15 @@ func (c *Config) Validate() error {
 	checkURL("BROWSER_URL", c.ShotConfig.BrowserURL, "ws", "wss")
 
 	// コネクタの待ち受けアドレスと、許可リストの正規表現。
-	if c.ConnectorConfig.ControlAddr != "" {
-		_, port, err := net.SplitHostPort(c.ConnectorConfig.ControlAddr)
+	if c.ConnectorConfig.Addr != "" {
+		_, port, err := net.SplitHostPort(c.ConnectorConfig.Addr)
 		if err != nil {
-			add("CONTROL_ADDR must be in host:port form: %q", c.ConnectorConfig.ControlAddr)
+			add("CONNECTOR_ADDR must be in host:port form: %q", c.ConnectorConfig.Addr)
 		} else if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 {
-			add("CONTROL_ADDR must have a port number between 1 and 65535: %q", c.ConnectorConfig.ControlAddr)
+			add("CONNECTOR_ADDR must have a port number between 1 and 65535: %q", c.ConnectorConfig.Addr)
 		}
 		if _, err := regexp.Compile(c.ConnectorConfig.DiscordAllow); err != nil {
-			add("CONTROL_DISCORD_ALLOW must be a valid regular expression: %v", err)
+			add("CONNECTOR_DISCORD_ALLOW must be a valid regular expression: %v", err)
 		}
 	}
 
@@ -141,7 +141,7 @@ func (c *Config) Validate() error {
 	// 能力に応じた必須項目。
 	// コネクタで操作を受けるモードでは、操作できる人のロールが決まらなければ誰も操作できない
 	// (空の ADMIN_ROLE_IDS は「全員拒否」が安全側の意味づけのため、気付かずに置かれやすい)。
-	if caps.AcceptOps && c.ConnectorConfig.ControlAddr != "" && len(c.ConnectorConfig.AdminRoles) == 0 {
+	if caps.AcceptOps && c.ConnectorConfig.Addr != "" && len(c.ConnectorConfig.AdminRoles) == 0 {
 		add("ADMIN_ROLE_IDS is required when the mode accepts operations through the connector (CRIMEBUSTER_MODE=%s)", string(c.Mode))
 	}
 	// 投稿を行うモード (自動投稿、またはコネクタ経由の操作による投稿) では通報先が要る。

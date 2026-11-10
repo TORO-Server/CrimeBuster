@@ -29,7 +29,7 @@ import (
 	"time"
 )
 
-// 操作のためのコネクタ (control)。TORO-MCP が、Admin 以上の人の頼みを、ここに取り次ぐ。
+// 操作のためのコネクタ。TORO-MCP が、Admin 以上の人の頼みを、ここに取り次ぐ。
 //
 //	GET  /v1/status
 //	GET  /v1/incidents?state=pending&limit=20          事件の一覧 (新しい順)
@@ -53,7 +53,7 @@ import (
 
 const maxBody = 1 << 20
 
-type Control struct {
+type Connector struct {
 	g     *app.Guard
 	authz *Authz
 	allow *regexp.Regexp
@@ -65,16 +65,16 @@ type Control struct {
 	shots  map[string]*shotJob // job の ID → 撮影の状態
 }
 
-func NewControl(base context.Context, g *app.Guard) (*Control, error) {
+func NewConnector(base context.Context, g *app.Guard) (*Connector, error) {
 	re, err := regexp.Compile(g.Config().ConnectorConfig.DiscordAllow)
 	if err != nil {
-		return nil, fmt.Errorf("CONTROL_DISCORD_ALLOW: %w", err)
+		return nil, fmt.Errorf("CONNECTOR_DISCORD_ALLOW: %w", err)
 	}
-	return &Control{g: g, authz: NewAuthz(g.Config()), allow: re, base: base, log: g.Logger(), audit: filepath.Join(g.Config().StorageConfig.DataDir, "audit.jsonl"), shots: map[string]*shotJob{}}, nil
+	return &Connector{g: g, authz: NewAuthz(g.Config()), allow: re, base: base, log: g.Logger(), audit: filepath.Join(g.Config().StorageConfig.DataDir, "audit.jsonl"), shots: map[string]*shotJob{}}, nil
 }
 
 // Handler はコネクタの HTTP API の全部の経路。
-func (c *Control) Handler() http.Handler {
+func (c *Connector) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /v1/status", c.wrap(c.status))
 	mux.HandleFunc("GET /v1/incidents", c.wrap(c.incidents))
@@ -95,7 +95,7 @@ func (c *Control) Handler() http.Handler {
 }
 
 // Serve は addr でコネクタを開き、ctx が終わるまで受ける。
-func (c *Control) Serve(ctx context.Context, addr string) error {
+func (c *Connector) Serve(ctx context.Context, addr string) error {
 	srv := &http.Server{
 		Addr: addr, Handler: c.Handler(),
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 5 * time.Minute, IdleTimeout: 60 * time.Second,
@@ -126,7 +126,7 @@ type result struct {
 }
 
 // who は、トークンの持ち主 (「名前 (id Discord の ID)」)。記録と、Discord の監査ログの理由に使う。
-func (c *Control) who(r *http.Request) string {
+func (c *Connector) who(r *http.Request) string {
 	if p := principalOf(r); p != nil {
 		return p.String()
 	}
@@ -144,7 +144,7 @@ func auditAdd(r *http.Request, key string, value any) {
 }
 
 // wrap は handler の返したエラーを、状態コードに直し、書き換える操作を audit.jsonl に残す。
-func (c *Control) wrap(h func(r *http.Request) (*result, error)) http.HandlerFunc {
+func (c *Connector) wrap(h func(r *http.Request) (*result, error)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		extra := map[string]any{}
 		r = r.WithContext(context.WithValue(r.Context(), auditKey{}, extra))
@@ -186,7 +186,7 @@ func badRequest(format string, a ...any) error {
 	return fmt.Errorf("%w: %s", errBadRequest, fmt.Sprintf(format, a...))
 }
 
-func (c *Control) record(r *http.Request, code int, err error, extra map[string]any) {
+func (c *Connector) record(r *http.Request, code int, err error, extra map[string]any) {
 	line := map[string]any{"t": time.Now().Unix(), "user": c.who(r), "method": r.Method, "path": r.URL.Path, "status": code}
 	maps.Copy(line, extra)
 	if err != nil {
@@ -217,7 +217,7 @@ func readBody(r *http.Request, v any) error {
 }
 
 // ---- 読むだけ ----
-func (c *Control) status(r *http.Request) (*result, error) {
+func (c *Connector) status(r *http.Request) (*result, error) {
 	g := c.g
 	pending, _ := g.Records(domain.StatePending, 0)
 	active := g.ActiveIncidents()
@@ -238,7 +238,7 @@ func summary(r *domain.Record) map[string]any {
 	}
 }
 
-func (c *Control) incidents(r *http.Request) (*result, error) {
+func (c *Connector) incidents(r *http.Request) (*result, error) {
 	state := domain.IncidentState(r.URL.Query().Get("state"))
 	switch state {
 	case "", domain.StatePending, domain.StateReported, domain.StateDismissed:
@@ -269,7 +269,7 @@ func (c *Control) incidents(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"incidents": out}}, nil
 }
 
-func (c *Control) incident(r *http.Request) (*result, error) {
+func (c *Connector) incident(r *http.Request) (*result, error) {
 	rec, err := c.g.Record(r.PathValue("id"))
 	if err != nil {
 		return nil, err
@@ -281,7 +281,7 @@ func (c *Control) incident(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"incident": rec, "report": report}}, nil
 }
 
-func (c *Control) image(w http.ResponseWriter, r *http.Request) {
+func (c *Connector) image(w http.ResponseWriter, r *http.Request) {
 	rec, err := c.g.Record(r.PathValue("id"))
 	if err != nil {
 		writeJSONResp(w, http.StatusNotFound, map[string]any{"error": err.Error()})
@@ -302,7 +302,7 @@ func (c *Control) image(w http.ResponseWriter, r *http.Request) {
 	writeJSONResp(w, http.StatusNotFound, map[string]any{"error": "image not found"})
 }
 
-func (c *Control) activity(r *http.Request) (*result, error) {
+func (c *Connector) activity(r *http.Request) (*result, error) {
 	name := r.PathValue("name")
 	if !domain.ValidName(name) {
 		return nil, badRequest("名前が正しくありません")
@@ -357,7 +357,7 @@ func lastN[T any](a []T, n int) []T {
 	return a
 }
 
-func (c *Control) chat(r *http.Request) (*result, error) {
+func (c *Connector) chat(r *http.Request) (*result, error) {
 	minutes := 30
 	if v := r.URL.Query().Get("minutes"); v != "" {
 		n, err := strconv.Atoi(v)
@@ -399,7 +399,7 @@ func (c *Control) chat(r *http.Request) (*result, error) {
 }
 
 // ---- 書き換える操作 ----
-func (c *Control) report(r *http.Request) (*result, error) {
+func (c *Connector) report(r *http.Request) (*result, error) {
 	var in struct{ Note string }
 	if err := readBody(r, &in); err != nil {
 		return nil, err
@@ -411,7 +411,7 @@ func (c *Control) report(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"incident": summary(rec), "thread": rec.Thread}}, nil
 }
 
-func (c *Control) rollback(r *http.Request) (*result, error) {
+func (c *Connector) rollback(r *http.Request) (*result, error) {
 	rec, err := c.g.StartRollback(c.base, r.PathValue("id"), c.who(r))
 	if err != nil {
 		return nil, err
@@ -421,7 +421,7 @@ func (c *Control) rollback(r *http.Request) (*result, error) {
 	}}, nil
 }
 
-func (c *Control) dismiss(r *http.Request) (*result, error) {
+func (c *Connector) dismiss(r *http.Request) (*result, error) {
 	var in struct{ Reason string }
 	if err := readBody(r, &in); err != nil {
 		return nil, err
@@ -436,7 +436,7 @@ func (c *Control) dismiss(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"incident": summary(rec)}}, nil
 }
 
-func (c *Control) mute(r *http.Request) (*result, error) {
+func (c *Connector) mute(r *http.Request) (*result, error) {
 	var in struct{ Reason string }
 	if err := readBody(r, &in); err != nil {
 		return nil, err
@@ -447,7 +447,7 @@ func (c *Control) mute(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"ok": true}}, nil
 }
 
-func (c *Control) kick(r *http.Request) (*result, error) {
+func (c *Connector) kick(r *http.Request) (*result, error) {
 	var in struct{ Reason string }
 	if err := readBody(r, &in); err != nil {
 		return nil, err
@@ -478,7 +478,7 @@ type shotJob struct {
 
 // screenshot は、BlueMap のいまの地図 (更新は最大 5 分遅れる) の撮影を裏で始めて、すぐ job の ID を返す (1 分ほどかかるので)。
 // できた画像は GET /v1/screenshots/{job} で取る。
-func (c *Control) screenshot(r *http.Request) (*result, error) {
+func (c *Connector) screenshot(r *http.Request) (*result, error) {
 	var in struct {
 		World    string   `json:"world"`
 		X        *float64 `json:"x"`
@@ -568,7 +568,7 @@ func (c *Control) screenshot(r *http.Request) (*result, error) {
 }
 
 // screenshotResult は、撮影の結果。できていれば PNG、まだなら 202、失敗なら 500。
-func (c *Control) screenshotResult(w http.ResponseWriter, r *http.Request) {
+func (c *Connector) screenshotResult(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("job")
 	c.shotMu.Lock()
 	job, ok := c.shots[id]
@@ -598,7 +598,7 @@ func (c *Control) screenshotResult(w http.ResponseWriter, r *http.Request) {
 // ---- Discord ----
 const maxDiscordReply = 60000
 
-func (c *Control) discordTools(r *http.Request) (*result, error) {
+func (c *Connector) discordTools(r *http.Request) (*result, error) {
 	if c.g.Reporter() == nil {
 		return nil, fmt.Errorf("%w: Discord につなぐ設定がありません", domain.ErrUnavailable)
 	}
@@ -622,7 +622,7 @@ func (c *Control) discordTools(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"tools": allowed, "note": "許可したツールだけを出しています"}}, nil
 }
 
-func (c *Control) discordCall(r *http.Request) (*result, error) {
+func (c *Connector) discordCall(r *http.Request) (*result, error) {
 	var in struct {
 		Tool       string         `json:"tool"`
 		PathParams map[string]any `json:"pathParams"`
@@ -683,7 +683,7 @@ var discordGuildTools = map[string]bool{
 }
 
 // checkDiscordCall は、パスの値が ID の形か、チャンネルが通報フォーラムかそのスレッドかを確かめる。
-func (c *Control) checkDiscordCall(ctx context.Context, tool string, params map[string]any) error {
+func (c *Connector) checkDiscordCall(ctx context.Context, tool string, params map[string]any) error {
 	for k, v := range params {
 		id, ok := v.(string)
 		if !pathParamRE.MatchString(k) || !ok || !snowflakeRE.MatchString(id) {
