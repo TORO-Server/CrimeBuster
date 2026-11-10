@@ -9,14 +9,15 @@ FROM --platform=$BUILDPLATFORM golang:1.27.3-alpine@sha256:fa3d596898d9f126af7c0
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY *.go ./
+COPY cmd ./cmd
+COPY internal ./internal
 ARG TARGETOS
 ARG TARGETARCH
 ARG VERSION=dev
 # timetzdata: イメージに時刻帯のファイルが無いので、TZ を読めるように実行ファイルに入れる
 RUN go vet ./... \
  && CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH \
-    go build -trimpath -tags timetzdata -ldflags="-s -w -X main.version=${VERSION}" -o /crime-buster .
+    go build -trimpath -tags timetzdata -ldflags="-s -w -X main.version=${VERSION}" -o /crime-buster ./cmd/crime-buster
 
 # 単体の試験 (ビルドする側の CPU で動かす)。通らないと、下のイメージまで来ない
 FROM --platform=$BUILDPLATFORM compile AS unit
