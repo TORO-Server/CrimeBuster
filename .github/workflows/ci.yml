@@ -76,3 +76,12 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # 設定リファレンスとコードの照合、用語の再混入の検査 (Python の標準ライブラリだけ)
+      - run: python3 scripts/check-docs.py

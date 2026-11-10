@@ -152,9 +152,9 @@
       - toro-browser-net
 
   # TORO-MCP (mcp.torosaba.net) が、crime-buster のコネクタに頼むために足す設定 (ServerImage の toro-mcp の environment に)。
-  # 管理用のツール (guard_* と discord_*) は、いまの Discord のロールが ADMIN_ROLE_IDS (既定: Owner と Admin) の人にだけ見える。
+  # 管理用のツールは、いまの Discord のロールが ADMIN_ROLE_IDS (環境変数で指定する。指定が無ければ、どのロールでも通さない) の人にだけ見える。
   # 利用者のトークンをそのままコネクタに渡すので、秘密は増えない。toro-auth には DISCORD_BOT_TOKEN が要る (いまのロールを調べるため)。
-  #   - CRIMEBUSTER_CONTROL_URL=http://crime-buster:8090
+  #   - CRIMEBUSTER_CONNECTOR_URL=http://crime-buster:8090
   #   - ADMIN_ROLE_IDS=
 
 # 一番上の networks と secrets に足す。どれも internal で、外には出られない。
