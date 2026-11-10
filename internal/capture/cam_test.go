@@ -2,7 +2,6 @@ package capture
 
 import (
 	"crime-buster/internal/detect"
-	"strings"
 	"testing"
 )
 
@@ -43,9 +42,6 @@ func TestCamFor(t *testing.T) {
 	}
 	if c.Dist < 70 || c.Dist > 150 {
 		t.Fatalf("outlier stretched the camera: dist %v", c.Dist)
-	}
-	if h := c.Hash("overworld"); !strings.HasPrefix(h, "#overworld:") || !strings.HasSuffix(h, ":0:0:perspective") {
-		t.Fatalf("hash %s", h)
 	}
 	// 列が無いときは範囲の真ん中
 	c2 := CamFor(&detect.Stats{X0: 0, X1: 100, Z0: 0, Z1: 200, Y0: 64, Y1: 64})

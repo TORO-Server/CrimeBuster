@@ -3,11 +3,10 @@ package app
 import (
 	"context"
 	"crime-buster/internal/capture"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
-	"time"
 )
 
 // このファイルは、Guard とそのサービスが使う依存の境界 (ポート) を定義する。
@@ -41,28 +40,27 @@ type Reporter interface {
 	TagID() string
 }
 
-// Shooter は、BlueMap の撮影のうち、このパッケージが使うもの。
+// Shooter は、Renderer の撮影のうち、このパッケージが使うもの。
 type Shooter interface {
 	Shot(ctx context.Context, mapID string, cam capture.Cam, out string, ann *capture.Annot) error
 	OverlayResult() string
 }
 
 // Console は、Minecraft のコンソール操作のうち、このパッケージが使うもの。
-// 生のコマンド実行 (Run) は relay.Console のものなので、opsConsole がつなぐ。
+// 生のコマンド実行 (Run) は console.Ops の土台のものなので、opsConsole がつなぐ。
 type Console interface {
-	Run(ctx context.Context, cmd string, timeout time.Duration, done func(string) bool) ([]string, error)
+	Run(ctx context.Context, cmd string) (string, error)
 	Rollback(ctx context.Context, player string, seconds int, world string) error
 	Kick(ctx context.Context, player, reason string) error
 	SaveFlush(ctx context.Context) error
-	BlueMapUpdate(ctx context.Context, mapID string, x, z, radius int) error
-	WaitBlueMap(ctx context.Context, mapID string, max time.Duration) error
+	Ping(ctx context.Context) error
 }
 
-// opsConsole は、relay.Ops を Console として使うためのつなぎ。
-type opsConsole struct{ ops *relay.Ops }
+// opsConsole は、console.Ops を Console として使うためのつなぎ。
+type opsConsole struct{ ops *console.Ops }
 
-func (c opsConsole) Run(ctx context.Context, cmd string, timeout time.Duration, done func(string) bool) ([]string, error) {
-	return c.ops.C.Run(ctx, cmd, timeout, done)
+func (c opsConsole) Run(ctx context.Context, cmd string) (string, error) {
+	return c.ops.C.Run(ctx, cmd)
 }
 
 func (c opsConsole) Rollback(ctx context.Context, player string, seconds int, world string) error {
@@ -75,13 +73,7 @@ func (c opsConsole) Kick(ctx context.Context, player, reason string) error {
 
 func (c opsConsole) SaveFlush(ctx context.Context) error { return c.ops.SaveFlush(ctx) }
 
-func (c opsConsole) BlueMapUpdate(ctx context.Context, mapID string, x, z, radius int) error {
-	return c.ops.BlueMapUpdate(ctx, mapID, x, z, radius)
-}
-
-func (c opsConsole) WaitBlueMap(ctx context.Context, mapID string, max time.Duration) error {
-	return c.ops.WaitBlueMap(ctx, mapID, max)
-}
+func (c opsConsole) Ping(ctx context.Context) error { return c.ops.Ping(ctx) }
 
 // 具象型がポートを満たすことの確認。
 var (

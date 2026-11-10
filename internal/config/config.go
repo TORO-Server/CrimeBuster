@@ -83,22 +83,19 @@ type DiscordConfig struct {
 	MCPProtocol      string // Mcp-Protocol-Version
 }
 
-// ConsoleConfig は Minecraft のコンソール (中継の crime-buster console-relay に頼む。Docker のソケットは持たない)。
+// ConsoleConfig は Minecraft のコンソール (Paper 標準の RCON で直接送る。Docker のソケットは持たない)。
 type ConsoleConfig struct {
-	ConsoleURL  string
-	KickEnabled bool
+	RconAddr     string // RCON の接続先 (host:port)。空なら、コンソールは使わない
+	RconPassword string // RCON のパスワード (ホスト側の env_file で渡す。RCON_PASSWORD_FILE も可)
+	KickEnabled  bool
 }
 
-// ShotConfig は BlueMap の画面の撮影。
+// ShotConfig は Renderer の画面の撮影。
 type ShotConfig struct {
-	BlueMapURL     string // 例: http://3d-map.torosaba.net
-	BrowserURL     string // 別のコンテナのブラウザ (例: ws://toro-chrome:9222)。空なら、ローカルの Chromium を起動する (開発用)
-	BlueMapResolve string // ローカルの Chromium だけ。例: toro-edge:80 (Host の名前をこの先に向ける)。空ならそのまま
-	MapIDs         map[string]string
-	ChromePath     string
-	ShotWidth      int
-	ShotHeight     int
-	ShotSettle     time.Duration
+	RendererURL string            // Renderer の API の接続先。例: http://toro-renderer:8080
+	MapIDs      map[string]string // ワールド名 → Renderer のマップ名
+	ShotWidth   int
+	ShotHeight  int
 }
 
 // ConnectorConfig は操作のためのコネクタ (TORO-MCP が、Admin 以上の人の頼みを、その人のトークンのまま取り次ぐ)。内部のネットワークだけに出す。
@@ -150,6 +147,10 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	botToken, err := envSecret("DISCORD_BOT_TOKEN")
+	if err != nil {
+		return nil, err
+	}
+	rconPassword, err := envSecret("RCON_PASSWORD")
 	if err != nil {
 		return nil, err
 	}
@@ -208,18 +209,15 @@ func LoadConfig() (*Config, error) {
 			MCPProtocol:      envStr("MCP_PROTOCOL_VERSION", "2025-11-25"),
 		},
 		ConsoleConfig: ConsoleConfig{
-			ConsoleURL:  envStr("CONSOLE_URL", "http://toro-console:8091"),
-			KickEnabled: envBool("KICK_ENABLED", false),
+			RconAddr:     envStr("RCON_ADDR", ""),
+			RconPassword: rconPassword,
+			KickEnabled:  envBool("KICK_ENABLED", false),
 		},
 		ShotConfig: ShotConfig{
-			BlueMapURL:     envStr("BLUEMAP_URL", "http://3d-map.torosaba.net"),
-			BrowserURL:     envStr("BROWSER_URL", ""),
-			BlueMapResolve: envStr("BLUEMAP_RESOLVE", ""),
-			MapIDs:         parseMap(envStr("MAP_IDS", "main=overworld")),
-			ChromePath:     envStr("CHROME_PATH", ""),
-			ShotWidth:      envInt("SHOT_WIDTH", 1280),
-			ShotHeight:     envInt("SHOT_HEIGHT", 720),
-			ShotSettle:     envDur("SHOT_SETTLE", 60*time.Second),
+			RendererURL: envStr("RENDERER_URL", ""),
+			MapIDs:      parseMap(envStr("MAP_IDS", "main=overworld")),
+			ShotWidth:   envInt("SHOT_WIDTH", 1280),
+			ShotHeight:  envInt("SHOT_HEIGHT", 720),
 		},
 		ConnectorConfig: ConnectorConfig{
 			Addr:             envStr("CONNECTOR_ADDR", ":8090"),
