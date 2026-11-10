@@ -15,7 +15,7 @@ var configEnvNames = []string{
 	"CHAT_ENABLED", "CHAT_RATE", "CHAT_RATE_WINDOW", "CHAT_REPEAT", "CHAT_REPEAT_WINDOW", "CHAT_RUN", "CHAT_LINK_REPEAT", "CHAT_BAD_WORDS_FILE", "CHAT_QUIET", "CHAT_MUTE_CMD", "CHAT_MUTE_TAG_ID",
 	"DISCORD_BOT_TOKEN", "DISCORD_BOT_TOKEN_FILE", "DISCORDSRV_CONFIG", "REPORT_CHANNEL_ID", "ROLLBACK_TAG_ID", "DISCORD_MCP_URL", "DISCORD_MCP_LAZY", "MCP_PROTOCOL_VERSION",
 	"CONSOLE_URL", "KICK_ENABLED", "BLUEMAP_URL", "BROWSER_URL", "BLUEMAP_RESOLVE", "MAP_IDS", "CHROME_PATH", "SHOT_WIDTH", "SHOT_HEIGHT", "SHOT_SETTLE",
-	"CONTROL_ADDR", "AUTH_INTERNAL_URL", "ADMIN_ROLE_IDS", "CONTROL_REQUIRE_LIVE_ROLES", "CONTROL_DISCORD_ALLOW", "WARPS_DIR", "DATA_DIR", "REPORT_RETENTION",
+	"CONNECTOR_ADDR", "AUTH_INTERNAL_URL", "ADMIN_ROLE_IDS", "CONNECTOR_REQUIRE_LIVE_ROLES", "CONNECTOR_DISCORD_ALLOW", "CONTROL_ADDR", "CONTROL_REQUIRE_LIVE_ROLES", "CONTROL_DISCORD_ALLOW", "WARPS_DIR", "DATA_DIR", "REPORT_RETENTION",
 }
 
 func clearConfigEnv(t *testing.T) {
@@ -55,7 +55,7 @@ func validConfig(mode Mode) *Config {
 			BlueMapURL: "http://3d-map.torosaba.net", ShotWidth: 1280, ShotHeight: 720, ShotSettle: 60 * time.Second,
 		},
 		ConnectorConfig: ConnectorConfig{
-			ControlAddr: ":8090", AuthInternalURL: "http://toro-auth:8081",
+			Addr: ":8090", AuthInternalURL: "http://toro-auth:8081",
 			RequireLiveRoles: true, DiscordAllow: DefaultDiscordAllow,
 		},
 		StorageConfig:   StorageConfig{DataDir: "/data"},
@@ -108,9 +108,9 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"auth url", func(c *Config) { c.ConnectorConfig.AuthInternalURL = "toro-auth:8081" }, "AUTH_INTERNAL_URL"},
 		{"discord mcp url", func(c *Config) { c.DiscordConfig.DiscordMCPURL = "ws://example.com" }, "DISCORD_MCP_URL"},
 		{"browser url", func(c *Config) { c.ShotConfig.BrowserURL = "http://example.com" }, "BROWSER_URL"},
-		{"control addr no port", func(c *Config) { c.ConnectorConfig.ControlAddr = "8090" }, "CONTROL_ADDR"},
-		{"control addr port zero", func(c *Config) { c.ConnectorConfig.ControlAddr = ":0" }, "CONTROL_ADDR"},
-		{"discord allow", func(c *Config) { c.ConnectorConfig.DiscordAllow = "[invalid" }, "CONTROL_DISCORD_ALLOW"},
+		{"connector addr no port", func(c *Config) { c.ConnectorConfig.Addr = "8090" }, "CONNECTOR_ADDR"},
+		{"connector addr port zero", func(c *Config) { c.ConnectorConfig.Addr = ":0" }, "CONNECTOR_ADDR"},
+		{"discord allow", func(c *Config) { c.ConnectorConfig.DiscordAllow = "[invalid" }, "CONNECTOR_DISCORD_ALLOW"},
 		{"shot settle", func(c *Config) { c.ShotConfig.ShotSettle = -time.Second }, "SHOT_SETTLE"},
 		{"report retention", func(c *Config) { c.RetentionConfig.ReportRetention = -time.Hour }, "REPORT_RETENTION"},
 	}
@@ -151,7 +151,7 @@ func TestValidateCapabilityRequirements(t *testing.T) {
 		}
 		c = validConfig(mode)
 		c.ConnectorConfig.AdminRoles = nil
-		c.ConnectorConfig.ControlAddr = ""
+		c.ConnectorConfig.Addr = ""
 		if err := c.Validate(); err != nil {
 			t.Errorf("%s without the connector must not require ADMIN_ROLE_IDS: %v", mode, err)
 		}
@@ -227,7 +227,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if c.ShotConfig.ShotWidth != 1280 || c.ShotConfig.ShotHeight != 720 || c.ShotConfig.MapIDs["main"] != "overworld" {
 		t.Errorf("shot defaults: %+v", c.ShotConfig)
 	}
-	if c.ConnectorConfig.ControlAddr != ":8090" || len(c.ConnectorConfig.AdminRoles) != 0 || !c.ConnectorConfig.RequireLiveRoles {
+	if c.ConnectorConfig.Addr != ":8090" || len(c.ConnectorConfig.AdminRoles) != 0 || !c.ConnectorConfig.RequireLiveRoles {
 		t.Errorf("connector defaults: %+v", c.ConnectorConfig)
 	}
 	if c.StorageConfig.DataDir != "/data" || c.RetentionConfig.ReportRetention != 90*24*time.Hour {

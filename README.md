@@ -38,9 +38,9 @@ CoreProtect (TiDB) ── 3 秒ごとに新しい行 ──▶ 検知 (人の手
 
 **まず `observe` で数日、次に `dry-run` で 1 度画像を確かめてから、`review` (人や Muse が見て決める) か `live` にする。**
 
-## 操作のためのコネクタ (control) と Muse
+## 操作のためのコネクタと Muse
 
-`CONTROL_ADDR` (既定 `:8090`) で、内部のネットワークに、コネクタを開く。人や AI が、事件を確かめて、通報・ロールバック・却下を決めるためのもので、[TORO-MCP](https://github.com/TORO-Server/TORO-MCP) (mcp.torosaba.net) が、**利用者のトークンをそのまま渡して**取り次ぐ。コネクタは、そのトークンを auth.torosaba.net に尋ね、**いまの Discord のロールが Admin 以上の人だけ**を通す。
+`CONNECTOR_ADDR` (既定 `:8090`) で、内部のネットワークに、コネクタを開く。人や AI が、事件を確かめて、通報・ロールバック・却下を決めるためのもので、[TORO-MCP](https://github.com/TORO-Server/TORO-MCP) (mcp.torosaba.net) が、**利用者のトークンをそのまま渡して**取り次ぐ。コネクタは、そのトークンを auth.torosaba.net に尋ね、**いまの Discord のロールが Admin 以上の人だけ**を通す。
 
 ```
 Muse など ──(OAuth 2.0 のトークン)──▶ mcp.torosaba.net ──(同じトークン)──▶ crime-buster :8090 ──▶ CoreProtect / BlueMap / コンソール / Discord-MCP
@@ -54,7 +54,7 @@ Muse など ──(OAuth 2.0 のトークン)──▶ mcp.torosaba.net ──(�
 | `POST /v1/players/{name}/mute` `…/kick` | ミュート (`CHAT_MUTE_CMD`) / キック。急ぐ操作なので、事件の処理の終わりを待たない。返すのは成否だけ (`{"ok":true}`。コンソールの行は返さない) |
 | `GET /v1/players/{name}/activity` `GET /v1/chat` | 最近のブロックの変更・コマンド・発言 |
 | `POST /v1/screenshot` `GET /v1/screenshots/{job}` | 指定した場所の BlueMap の撮影を始める (202 と job) / 撮れた画像 (まだなら 202)。撮るのに 1 分ほどかかり、Muse の 1 回の呼び出しは 45 秒で切れるので、2 回に分けている |
-| `GET /v1/discord/tools` `POST /v1/discord/call` | 許可した Discord のツールだけ (`CONTROL_DISCORD_ALLOW`。読むことと、投稿・タグ付け。BAN・キック・ロール・削除は含めない)。チャンネルを指定するツールは、通報フォーラムとそのスレッドだけ。`discord_update_channel` はタグ (`applied_tags`) だけ。投稿の `allowed_mentions` は、呼ぶ側に関係なく「だれにも通知しない」にする |
+| `GET /v1/discord/tools` `POST /v1/discord/call` | 許可した Discord のツールだけ (`CONNECTOR_DISCORD_ALLOW`。読むことと、投稿・タグ付け。BAN・キック・ロール・削除は含めない)。チャンネルを指定するツールは、通報フォーラムとそのスレッドだけ。`discord_update_channel` はタグ (`applied_tags`) だけ。投稿の `allowed_mentions` は、呼ぶ側に関係なく「だれにも通知しない」にする |
 
 - **認証は OAuth 2.0 の Bearer トークン** (共有の秘密は無い)。`AUTH_INTERNAL_URL` の `/introspect` に尋ね、返ってきた**いまの Discord のロール** (`roles_source` が `live`) が `ADMIN_ROLE_IDS` (環境変数で指定する。指定が無ければ、どのロールでも通さない) のどれかなら通す。トークンが無効 → 401、Admin ではない → 403、auth に尋ねられない・ロールを確かめられない → 503。**コネクタは公開しない** (ports を付けない、トンネルに載せない)。
 - **scope**: トークンに `scope` が無ければ (本人が auth で発行した 90 日トークン) 通す。`scope` があるとき (OAuth の同意の範囲) は、空白で区切った中に `mcp` という言葉が要る。無ければ 403。読み取りだけに同意したトークンでは、管理の操作はできない。
@@ -191,8 +191,9 @@ GET  /healthz                                  204
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
 | `CRIMEBUSTER_MODE` | `observe` | `observe` / `dry-run` / `review` / `live` |
-| `CONTROL_ADDR` | `:8090` (空 = コネクタを開かない) | コネクタの待ち受けアドレス |
-| `CONTROL_DISCORD_ALLOW` | 読む・投稿・タグ付けだけ | コネクタから呼んでよい Discord のツール名の正規表現 |
+| `CONNECTOR_ADDR` | `:8090` (空 = コネクタを開かない) | コネクタの待ち受けアドレス |
+| `CONNECTOR_DISCORD_ALLOW` | 読む・投稿・タグ付けだけ | コネクタから呼んでよい Discord のツール名の正規表現 |
+| `CONNECTOR_REQUIRE_LIVE_ROLES` | `true` | コネクタの認可で、いまの Discord のロール (roles_source=live) だけを信じるか |
 | `DB_HOST` `DB_PORT` `DB_USER` `DB_PASSWORD` (`DB_PASSWORD_FILE`) `DB_NAME` `DB_TABLE_PREFIX` | `tidb` `4000` `root` (空) `coreprotect` `coreprotect_` | CoreProtect のデータベース (読むだけ)。`SELECT` だけの専用のユーザーにする (`root` のままだと、起動のログに警告が出る) |
 | `BURST_WINDOW` `BREAK_BURST` `PLACE_BURST` `SUSTAINED_WINDOW` `SUSTAINED_BREAKS` | 5s 100 150 10m 1500 | 検知の閾値 |
 | `QUIET` `MAX_INCIDENT` | 90s / 10m | 動きが止まって何秒で閉じるか / 長くても何分で閉じるか |
@@ -216,6 +217,8 @@ GET  /healthz                                  204
 | `WARPS_DIR` | (空) | EssentialsX の `warps/` (報告に「ワープ ○○ の近く」と書く) |
 | `DATA_DIR` | `/data` | 状態 (`state.json`) と、報告のフォルダ |
 | `REPORT_RETENTION` | `2160h` (90 日。`0` = 消さない) | 事件のフォルダを残す長さ |
+
+コネクタの設定 (`CONNECTOR_ADDR`、`CONNECTOR_REQUIRE_LIVE_ROLES`、`CONNECTOR_DISCORD_ALLOW`) は、旧名 (`CONTROL_ADDR`、`CONTROL_REQUIRE_LIVE_ROLES`、`CONTROL_DISCORD_ALLOW`) でも読む (互換)。両方ある場合は新しい名前が優先し、旧名で読んだ場合は起動のログにその旨が出る。
 
 `crime-buster console-relay` が読むもの (crime-buster の設定とは別):
 

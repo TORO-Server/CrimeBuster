@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -48,9 +49,9 @@ func main() {
 	case "scan":
 		err = cmdScan(log, os.Args[2:])
 	case "scan-chat":
-		err = cmdScanChat(os.Args[2:])
+		err = cmdScanChat(log, os.Args[2:])
 	case "healthcheck":
-		err = cmdHealth(os.Args[2:])
+		err = cmdHealth(log, os.Args[2:])
 	case "version":
 		fmt.Println(version)
 	default:
@@ -62,8 +63,20 @@ func main() {
 	}
 }
 
-func cmdRun(log *slog.Logger) error {
+// loadConfig は設定を読み、旧名 (互換) で読んだ環境変数があれば、起動のログに1回出す。
+func loadConfig(log *slog.Logger) (*config.Config, error) {
 	cfg, err := config.LoadConfig()
+	if err != nil {
+		return nil, err
+	}
+	if names := cfg.LegacyEnvNames(); len(names) > 0 {
+		log.Warn("環境変数を旧名で読んだ (新しい名前への移行を推奨)", "names", strings.Join(names, ", "))
+	}
+	return cfg, nil
+}
+
+func cmdRun(log *slog.Logger) error {
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}
@@ -107,19 +120,19 @@ func cmdRun(log *slog.Logger) error {
 		log.Info("Discord に接続できる", "info", info)
 	}
 	g := app.NewGuard(cfg, cp, st, ops, sh, rep, log)
-	if cfg.ConnectorConfig.ControlAddr != "" {
+	if cfg.ConnectorConfig.Addr != "" {
 		connector.Version = version
-		ctl, err := connector.NewControl(ctx, g)
+		conn, err := connector.NewConnector(ctx, g)
 		if err != nil {
 			return err
 		}
 		go func() {
-			if err := ctl.Serve(ctx, cfg.ConnectorConfig.ControlAddr); err != nil {
+			if err := conn.Serve(ctx, cfg.ConnectorConfig.Addr); err != nil {
 				log.Error("コネクタが止まった", "err", err)
 			}
 		}()
 	} else {
-		log.Info("コネクタは開かない (CONTROL_ADDR が空)")
+		log.Info("コネクタは開かない (CONNECTOR_ADDR が空)")
 	}
 	log.Info("起動", "version", version, "mode", cfg.Mode,
 		"burst", fmt.Sprintf("壊 %d / 置 %d / %s", cfg.DetectConfig.BreakBurst, cfg.DetectConfig.PlaceBurst, cfg.DetectConfig.BurstWindow),
@@ -133,7 +146,7 @@ func cmdCheck(log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	console := fs.Bool("console", false, "Minecraft のコンソールに `bluemap` (状態の表示だけ) を送って確かめる")
 	_ = fs.Parse(args)
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}
@@ -207,7 +220,7 @@ func cmdReplay(log *slog.Logger, args []string) error {
 	if err != nil {
 		return err
 	}
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}
@@ -270,14 +283,14 @@ func cmdReplay(log *slog.Logger, args []string) error {
 }
 
 // healthcheck: 監視の 1 回が成功していれば、DataDir/health の更新時刻が新しい。-relay は、コンソールの中継を確かめる。
-func cmdHealth(args []string) error {
+func cmdHealth(log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("healthcheck", flag.ExitOnError)
 	useRelay := fs.Bool("relay", false, "コンソールの中継 (console-relay) が答えるかを確かめる")
 	_ = fs.Parse(args)
 	if *useRelay {
 		return relay.RelayHealth()
 	}
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}

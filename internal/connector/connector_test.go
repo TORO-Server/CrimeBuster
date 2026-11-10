@@ -82,7 +82,7 @@ func (f *fakeAuth) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{"active": true, "claims": claims})
 }
 
-type ctlEnv struct {
+type connEnv struct {
 	auth *fakeAuth
 	g    *app.Guard
 	srv  *httptest.Server
@@ -91,11 +91,11 @@ type ctlEnv struct {
 	dir  string
 }
 
-func newCtlEnv(t *testing.T, mode config.Mode) *ctlEnv {
-	return newCtlEnvCP(t, mode, nil)
+func newConnEnv(t *testing.T, mode config.Mode) *connEnv {
+	return newConnEnvCP(t, mode, nil)
 }
 
-func newCtlEnvCP(t *testing.T, mode config.Mode, cp *detect.CP) *ctlEnv {
+func newConnEnvCP(t *testing.T, mode config.Mode, cp *detect.CP) *connEnv {
 	t.Helper()
 	dir := t.TempDir()
 	cfg := &config.Config{
@@ -130,16 +130,16 @@ func newCtlEnvCP(t *testing.T, mode config.Mode, cp *detect.CP) *ctlEnv {
 	authSrv := httptest.NewServer(fa)
 	t.Cleanup(authSrv.Close)
 	cfg.AuthInternalURL = authSrv.URL
-	ctl, err := NewControl(context.Background(), g)
+	conn, err := NewConnector(context.Background(), g)
 	if err != nil {
 		t.Fatal(err)
 	}
-	srv := httptest.NewServer(ctl.Handler())
+	srv := httptest.NewServer(conn.Handler())
 	t.Cleanup(srv.Close)
-	return &ctlEnv{auth: fa, g: g, srv: srv, con: con, mcp: fm, dir: dir}
+	return &connEnv{auth: fa, g: g, srv: srv, con: con, mcp: fm, dir: dir}
 }
 
-func (e *ctlEnv) do(t *testing.T, method, path, body string) (int, []byte) {
+func (e *connEnv) do(t *testing.T, method, path, body string) (int, []byte) {
 	t.Helper()
 	req, _ := http.NewRequest(method, e.srv.URL+path, strings.NewReader(body))
 	req.Header.Set("Authorization", "Bearer "+tokAdmin)
@@ -152,7 +152,7 @@ func (e *ctlEnv) do(t *testing.T, method, path, body string) (int, []byte) {
 	return res.StatusCode, b
 }
 
-func (e *ctlEnv) putRecord(t *testing.T, r *domain.Record) {
+func (e *connEnv) putRecord(t *testing.T, r *domain.Record) {
 	t.Helper()
 	dir := filepath.Join(e.dir, "reports", r.ID)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -167,8 +167,8 @@ func (e *ctlEnv) putRecord(t *testing.T, r *domain.Record) {
 	}
 }
 
-func TestControlAuthenticatesWithOAuthTokens(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorAuthenticatesWithOAuthTokens(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	get := func(auth string) (int, string, string) {
 		req, _ := http.NewRequest("GET", e.srv.URL+"/v1/status", nil)
 		if auth != "" {
@@ -208,8 +208,8 @@ func TestControlAuthenticatesWithOAuthTokens(t *testing.T) {
 }
 
 // OAuth のトークンの scope: 無ければ通し、あれば mcp という言葉が要る。
-func TestControlScopeRule(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorScopeRule(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	for tok, want := range map[string]int{
 		tokAdmin:      200, // scope なし (本人が発行した 90 日トークン)
 		tokOAuthMCP:   200,
@@ -236,7 +236,7 @@ func TestControlScopeRule(t *testing.T) {
 }
 
 // auth の答えの scope が文字列でないときは、読めないものとして断る。
-func TestControlScopeWrongTypeFailsClosed(t *testing.T) {
+func TestConnectorScopeWrongTypeFailsClosed(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write([]byte(`{"active":true,"claims":{"id":"1","roles":["` + adminRole + `"],"roles_source":"live","scope":["mcp"]}}`))
 	}))
@@ -247,12 +247,12 @@ func TestControlScopeWrongTypeFailsClosed(t *testing.T) {
 	}
 }
 
-func TestControlStaleRolesAllowedWhenNotRequired(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorStaleRolesAllowedWhenNotRequired(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	e.g.Config().RequireLiveRoles = false
 	e.srv.Close()
-	ctl, _ := NewControl(context.Background(), e.g)
-	srv := httptest.NewServer(ctl.Handler())
+	conn, _ := NewConnector(context.Background(), e.g)
+	srv := httptest.NewServer(conn.Handler())
 	defer srv.Close()
 	req, _ := http.NewRequest("GET", srv.URL+"/v1/status", nil)
 	req.Header.Set("Authorization", "Bearer "+tokStale)
@@ -262,12 +262,12 @@ func TestControlStaleRolesAllowedWhenNotRequired(t *testing.T) {
 	}
 	res.Body.Close()
 	if res.StatusCode != 200 {
-		t.Fatalf("status %d, want 200 when CONTROL_REQUIRE_LIVE_ROLES=false", res.StatusCode)
+		t.Fatalf("status %d, want 200 when CONNECTOR_REQUIRE_LIVE_ROLES=false", res.StatusCode)
 	}
 }
 
-func TestControlIncidentsListGetImage(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorIncidentsListGetImage(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	now := time.Now().Unix()
 	e.putRecord(t, &domain.Record{ID: "a-old", Kind: "block", Name: "old", Created: now - 100, State: domain.StatePending, Images: []string{"damage.png"}})
 	e.putRecord(t, &domain.Record{ID: "b-new", Kind: "chat", Name: "new", Created: now, State: domain.StatePending})
@@ -310,14 +310,14 @@ func TestControlIncidentsListGetImage(t *testing.T) {
 	}
 }
 
-func TestControlDismissNeedsReviewMode(t *testing.T) {
-	e := newCtlEnv(t, config.ModeDryRun)
+func TestConnectorDismissNeedsReviewMode(t *testing.T) {
+	e := newConnEnv(t, config.ModeDryRun)
 	e.putRecord(t, &domain.Record{ID: "x1", Kind: "block", Name: "x", Created: 1, State: domain.StatePending})
 	if code, _ := e.do(t, "POST", "/v1/incidents/x1/dismiss", `{"reason":"工事"}`); code != 403 {
 		t.Fatalf("dry-run dismiss: %d, want 403", code)
 	}
 
-	e = newCtlEnv(t, config.ModeReview)
+	e = newConnEnv(t, config.ModeReview)
 	e.putRecord(t, &domain.Record{ID: "x1", Kind: "block", Name: "x", Created: 1, State: domain.StatePending})
 	code, b := e.do(t, "POST", "/v1/incidents/x1/dismiss", "{\"reason\":\"工事\\nの人\"}")
 	if code != 200 {
@@ -345,8 +345,8 @@ func TestControlDismissNeedsReviewMode(t *testing.T) {
 	}
 }
 
-func TestControlRollbackRefusals(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorRollbackRefusals(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	now := time.Now().Unix()
 	e.putRecord(t, &domain.Record{ID: "t1", Kind: "block", Name: "trusty", World: "main", Created: 1, Start: now, State: domain.StatePending})
 	e.putRecord(t, &domain.Record{ID: "c1", Kind: "chat", Name: "talker", Created: 1, Start: now, State: domain.StatePending})
@@ -369,8 +369,8 @@ func TestControlRollbackRefusals(t *testing.T) {
 }
 
 // 同じ事件の操作は、重ならない。
-func TestControlBusyIncidentConflicts(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorBusyIncidentConflicts(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	e.putRecord(t, &domain.Record{ID: "b1", Kind: "block", Name: "griefer", World: "main", Created: 1, Start: time.Now().Unix(), State: domain.StatePending})
 	if err := e.g.Claim("b1", "rollback"); err != nil {
 		t.Fatal(err)
@@ -387,12 +387,12 @@ func TestControlBusyIncidentConflicts(t *testing.T) {
 }
 
 // ロールバックは、コンソールの返事ではなく、データベースで確かめて記録する。
-func TestControlRollbackIsVerifiedInDatabase(t *testing.T) {
+func TestConnectorRollbackIsVerifiedInDatabase(t *testing.T) {
 	const line = `[12:35:53 INFO]: CoreProtect - Rollback completed for "griefer".`
 	run := func(t *testing.T, con *testutil.FakeConsole, done, total int64) *domain.Record {
 		t.Helper()
 		sqldb, _ := testutil.NewFakeDB(t, testutil.FakeAnswer{Has: "rolled_back", Rows: [][]driver.Value{{done, total}}})
-		e := newCtlEnvCP(t, config.ModeReview, detect.NewCP(sqldb, "coreprotect_"))
+		e := newConnEnvCP(t, config.ModeReview, detect.NewCP(sqldb, "coreprotect_"))
 		e.con.Reply = con.Reply
 		e.con.Err = con.Err
 		e.g.SetRollbackConfirmWait(time.Millisecond)
@@ -437,8 +437,8 @@ func TestControlRollbackIsVerifiedInDatabase(t *testing.T) {
 	}
 }
 
-func TestControlMuteAndKick(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorMuteAndKick(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	code, b := e.do(t, "POST", "/v1/players/spammer/mute", `{"reason":"連投"}`)
 	if code != 200 {
 		t.Fatalf("mute: %d %s", code, b)
@@ -470,15 +470,15 @@ func TestControlMuteAndKick(t *testing.T) {
 		t.Fatalf("unsafe commands were sent: %q", s)
 	}
 
-	e = newCtlEnv(t, config.ModeObserve)
+	e = newConnEnv(t, config.ModeObserve)
 	if code, _ := e.do(t, "POST", "/v1/players/spammer/kick", ""); code != 403 {
 		t.Errorf("observe kick: %d, want 403", code)
 	}
 }
 
 // キックとミュートは、事件の処理 (g.opMu) を待たない。
-func TestControlMuteAndKickDoNotWaitForOps(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorMuteAndKickDoNotWaitForOps(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	e.g.LockOp()
 	defer e.g.UnlockOp()
 	done := make(chan struct{})
@@ -499,8 +499,8 @@ func TestControlMuteAndKickDoNotWaitForOps(t *testing.T) {
 }
 
 // コンソールの中継が断ったとき、コネクタは 403 や 503 を返す。
-func TestControlKickRelayErrors(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorKickRelayErrors(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	e.con.Err = fmt.Errorf("%w: busy", domain.ErrUnavailable)
 	if code, _ := e.do(t, "POST", "/v1/players/spammer/kick", ""); code != 503 {
 		t.Errorf("中継が使えない: %d", code)
@@ -512,8 +512,8 @@ func TestControlKickRelayErrors(t *testing.T) {
 }
 
 // Dismiss も、ほかの操作と同じに、事件の ID の形を確かめる。
-func TestControlDismissRejectsBadID(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorDismissRejectsBadID(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	outside := filepath.Join(e.dir, "outside")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatal(err)
@@ -530,8 +530,8 @@ func TestControlDismissRejectsBadID(t *testing.T) {
 	}
 }
 
-func TestControlActivityValidatesHours(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview) // データベースが無いので、検査を通れば落ちる
+func TestConnectorActivityValidatesHours(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview) // データベースが無いので、検査を通れば落ちる
 	for _, h := range []string{"NaN", "nan", "Inf", "-Inf", "+Inf", "0", "-1", "73", "1e9", "x"} {
 		if code, b := e.do(t, "GET", "/v1/players/griefer/activity?hours="+url.QueryEscape(h), ""); code != 400 {
 			t.Errorf("hours=%s: %d %s, want 400", h, code, b)
@@ -539,8 +539,8 @@ func TestControlActivityValidatesHours(t *testing.T) {
 	}
 }
 
-func TestControlDiscordAllowlist(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorDiscordAllowlist(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	code, b := e.do(t, "GET", "/v1/discord/tools?query=channel", "")
 	if code != 200 || bytes.Contains(b, []byte("delete_channel")) || !bytes.Contains(b, []byte("create_message")) {
 		t.Fatalf("tools: %d %s", code, b)
@@ -579,8 +579,8 @@ func TestControlDiscordAllowlist(t *testing.T) {
 }
 
 // Discord のツールは、通報フォーラムとそのスレッドの中だけ。
-func TestControlDiscordChannelScope(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorDiscordChannelScope(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	call := func(tool, pathParams, body string) int {
 		t.Helper()
 		code, _ := e.do(t, "POST", "/v1/discord/call", `{"tool":"`+tool+`","pathParams":`+pathParams+`,"body":`+body+`}`)
@@ -622,8 +622,8 @@ func TestControlDiscordChannelScope(t *testing.T) {
 	}
 }
 
-func TestControlDiscordCallIsAudited(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorDiscordCallIsAudited(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	const secret = "投稿の本文そのもの"
 	code, b := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+forumID+`"},"body":{"content":"`+secret+`"}}`)
 	if code != 200 {
@@ -660,8 +660,8 @@ func TestControlDiscordCallIsAudited(t *testing.T) {
 	}
 }
 
-func TestControlStatus(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorStatus(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	e.putRecord(t, &domain.Record{ID: "p1", Kind: "block", Name: "p", Created: 1, State: domain.StatePending})
 	code, b := e.do(t, "GET", "/v1/status", "")
 	var st map[string]any
@@ -671,8 +671,8 @@ func TestControlStatus(t *testing.T) {
 	}
 }
 
-func TestControlScreenshotValidation(t *testing.T) {
-	e := newCtlEnv(t, config.ModeReview)
+func TestConnectorScreenshotValidation(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
 	if code, _ := e.do(t, "POST", "/v1/screenshot", `{"x":1,"z":2}`); code != 503 {
 		t.Errorf("no shooter: %d, want 503", code)
 	}

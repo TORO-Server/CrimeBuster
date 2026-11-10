@@ -6,7 +6,7 @@ import (
 	"strings"
 )
 
-// IncidentState は事件の状態。コネクタ (control) は、pending のものを「確認待ち」として見せる。
+// IncidentState は事件の状態。コネクタは、pending のものを「確認待ち」として見せる。
 // record.json には、この文字列のまま保存する。
 type IncidentState string
 
