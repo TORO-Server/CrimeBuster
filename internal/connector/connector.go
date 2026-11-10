@@ -42,7 +42,7 @@ import (
 //	POST /v1/players/{name}/kick      {"reason"}        退出させる
 //	GET  /v1/players/{name}/activity?hours=6            その人の最近のブロックの変更・コマンド・発言
 //	GET  /v1/chat?minutes=30&player=NAME                最近のチャット
-//	POST /v1/screenshot {"x","y","z","distance",...}   BlueMap の画面の撮影を始める (202 と job)
+//	POST /v1/screenshot {"x","y","z","distance",...}   Renderer の画面の撮影を始める (202 と job)
 //	GET  /v1/screenshots/{job}                          撮れた画像 (PNG)。まだなら 202
 //	GET  /v1/discord/tools?query=                       使える Discord のツール
 //	POST /v1/discord/call {"tool","pathParams","body"}  Discord のツールを呼ぶ (許可したものだけ)
@@ -468,7 +468,7 @@ const (
 	ShotJobFailed  ShotJobState = "failed"  // 撮影できなかった
 )
 
-// shotJob は、裏で撮っている BlueMap の画像 1 枚。
+// shotJob は、裏で撮っている Renderer の画像 1 枚。
 type shotJob struct {
 	State ShotJobState
 	Path  string
@@ -476,7 +476,7 @@ type shotJob struct {
 	At    time.Time
 }
 
-// screenshot は、BlueMap のいまの地図 (更新は最大 5 分遅れる) の撮影を裏で始めて、すぐ job の ID を返す (1 分ほどかかるので)。
+// screenshot は、Renderer の撮影を裏で始めて、すぐ job の ID を返す (描画に少し時間がかかるので)。
 // できた画像は GET /v1/screenshots/{job} で取る。
 func (c *Connector) screenshot(r *http.Request) (*result, error) {
 	var in struct {

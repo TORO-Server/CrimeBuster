@@ -3,10 +3,10 @@ package app
 import (
 	"context"
 	"crime-buster/internal/config"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
 	"crime-buster/internal/store"
 	"fmt"
 	"os"
@@ -60,10 +60,10 @@ func (s *ChatService) ProcessChat(ctx context.Context, inc *store.Incident, end 
 
 	in := notify.ChatReportInput{Name: inc.Name, UUID: inc.UUID, Msgs: msgs, Trigger: inc.Trigger, Mode: s.g.cfg.Mode}
 	if !inc.AIOnly {
-		in.MuteCmd = relay.MuteCommand(s.g.cfg.ChatConfig.ChatMuteCmd, inc.Name)
+		in.MuteCmd = console.MuteCommand(s.g.cfg.ChatConfig.ChatMuteCmd, inc.Name)
 	}
 	if config.CapabilitiesFor(s.g.cfg.Mode).AutoMute && in.MuteCmd != "" && s.console != nil {
-		if _, err := s.console.Run(ctx, in.MuteCmd, relay.SendOnlyTimeout, nil); err != nil {
+		if _, err := s.console.Run(ctx, in.MuteCmd); err != nil {
 			in.MuteErr = err.Error()
 			s.g.log.Error("ミュートに失敗", "player", inc.Name, "err", err)
 		} else {

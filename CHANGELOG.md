@@ -2,6 +2,13 @@
 
 版と変更の対応。タグは版と対応する。
 
+## v0.4.0
+
+- 撮影を BlueMap のブラウザ撮影から TORO-Renderer の描画 API へ替えた。ブラウザ (Chromium、chromedp) は持たなくなった。印 (壊された列の線、範囲の枠、ラベル) は、Renderer が返すカメラの変換を使ってこちらで描く。地図の更新待ち (`bluemap update`) は無くなり、撮る前の `save-all flush` だけを残した
+- コンソールの転送を、Docker のソケットを持つ別プロセス (中継、`console-relay`) から、Paper 標準の RCON へ替えた。crime-buster は Docker のソケットを持たなくなった。送れるコマンドの許可リストは、送る側で送る前に確かめる形にし、通す形は変えていない (BlueMap の形だけを除いた)。RCON の応答はコマンドへの返事だけなので、ロールバックの成否は従来どおりデータベースで確かめる
+- 設定の変更: `CONSOLE_URL`、`BLUEMAP_URL`、`BROWSER_URL`、`BLUEMAP_RESOLVE`、`CHROME_PATH`、`CHROME_FLAGS`、`SHOT_SETTLE` と、中継の設定 (`CONSOLE_ADDR`、`DOCKER_SOCKET`、`MC_CONTAINER`) を廃止し、`RCON_ADDR`、`RCON_PASSWORD`、`RENDERER_URL` を足した。`MAP_IDS` の対応先は Renderer のマップ名になった。コンソールを使うモード (review、live) では `RCON_ADDR` と `RCON_PASSWORD` が必須になった
+- `console-relay` サブコマンドと `healthcheck -relay` を廃止した。`check -console` は RCON の疎通の確認になった
+
 ## v0.3.0
 
 - コネクタの環境変数の旧名 (`CONTROL_ADDR`、`CONTROL_REQUIRE_LIVE_ROLES`、`CONTROL_DISCORD_ALLOW`) の互換を廃止した。新しい名前 (`CONNECTOR_`) のみを読む

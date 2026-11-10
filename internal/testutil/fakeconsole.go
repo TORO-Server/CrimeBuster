@@ -4,40 +4,32 @@ import (
 	"context"
 	"strings"
 	"sync"
-	"time"
 )
 
-// fakeConsole は Ops の試験用。
+// FakeConsole は Ops の試験用。Run は、コマンドの接頭辞に合う応答を返す。
 type FakeConsole struct {
-	mu      sync.Mutex
-	cmds    []string
-	Reply   map[string][]string
-	Err     error
-	Longest time.Duration // いちばん長い timeout
+	mu    sync.Mutex
+	cmds  []string
+	Reply map[string][]string // 接頭辞 → 応答の行 (Run は改行でつないで返す)
+	Err   error
 }
 
-func (f *FakeConsole) Run(_ context.Context, cmd string, timeout time.Duration, done func(string) bool) ([]string, error) {
+func (f *FakeConsole) Run(_ context.Context, cmd string) (string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cmds = append(f.cmds, cmd)
-	f.Longest = max(f.Longest, timeout)
 	if f.Err != nil {
-		return nil, f.Err
+		return "", f.Err
 	}
 	for prefix, lines := range f.Reply {
 		if strings.HasPrefix(cmd, prefix) {
-			for _, l := range lines {
-				if done != nil && done(l) {
-					break
-				}
-			}
-			return lines, nil
+			return strings.Join(lines, "\n"), nil
 		}
 	}
-	return nil, nil
+	return "", nil
 }
 
-// sent は、受けたコマンドの写し。
+// Sent は、受けたコマンドの写し。
 func (f *FakeConsole) Sent() []string {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -50,10 +42,9 @@ func (f *FakeConsole) Reset() {
 	f.cmds = nil
 }
 
+// FailConsole は、ロールバックの失敗の応答を返す。
 type FailConsole struct{ *FakeConsole }
 
-func (f *FailConsole) Run(ctx context.Context, cmd string, to time.Duration, done func(string) bool) ([]string, error) {
-	line := "[10:00:00 INFO]: CoreProtect - Rollback failed."
-	done(line)
-	return []string{line}, nil
+func (f *FailConsole) Run(context.Context, string) (string, error) {
+	return "CoreProtect - Rollback failed.", nil
 }

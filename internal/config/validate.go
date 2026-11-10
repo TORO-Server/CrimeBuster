@@ -111,11 +111,19 @@ func (c *Config) Validate() error {
 
 	// URL 形式の項目 (空なら使わない、または既定値が入る)。
 	checkURL("AI_BASE_URL", c.AIConfig.AIBaseURL, "http", "https")
-	checkURL("BLUEMAP_URL", c.ShotConfig.BlueMapURL, "http", "https")
-	checkURL("CONSOLE_URL", c.ConsoleConfig.ConsoleURL, "http", "https")
+	checkURL("RENDERER_URL", c.ShotConfig.RendererURL, "http", "https")
 	checkURL("AUTH_INTERNAL_URL", c.ConnectorConfig.AuthInternalURL, "http", "https")
 	checkURL("DISCORD_MCP_URL", c.DiscordConfig.DiscordMCPURL, "http", "https")
-	checkURL("BROWSER_URL", c.ShotConfig.BrowserURL, "ws", "wss")
+
+	// RCON の接続先は host:port の形 (空ならコンソールを使わない)。
+	if c.ConsoleConfig.RconAddr != "" {
+		_, port, err := net.SplitHostPort(c.ConsoleConfig.RconAddr)
+		if err != nil {
+			add("RCON_ADDR must be in host:port form: %q", c.ConsoleConfig.RconAddr)
+		} else if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 {
+			add("RCON_ADDR must have a port number between 1 and 65535: %q", c.ConsoleConfig.RconAddr)
+		}
+	}
 
 	// コネクタの待ち受けアドレスと、許可リストの正規表現。
 	if c.ConnectorConfig.Addr != "" {
@@ -135,8 +143,18 @@ func (c *Config) Validate() error {
 		positiveInt("SHOT_WIDTH", c.ShotConfig.ShotWidth)
 		positiveInt("SHOT_HEIGHT", c.ShotConfig.ShotHeight)
 	}
-	nonNegativeDur("SHOT_SETTLE", c.ShotConfig.ShotSettle)
 	nonNegativeDur("REPORT_RETENTION", c.RetentionConfig.ReportRetention)
+
+	// コンソールを実際に使うモード (コネクタ経由の操作を受ける、または自動でロールバックする) では、
+	// RCON の接続先とパスワードが要る。無いと、操作が黙って失敗するだけになるため、起動時に止める。
+	if caps.AcceptOps || caps.AutoRollback {
+		if c.ConsoleConfig.RconAddr == "" {
+			add("RCON_ADDR is required when the mode uses the console (CRIMEBUSTER_MODE=%s)", string(c.Mode))
+		}
+		if c.ConsoleConfig.RconPassword == "" {
+			add("RCON_PASSWORD is required when the mode uses the console (CRIMEBUSTER_MODE=%s)", string(c.Mode))
+		}
+	}
 
 	// 能力に応じた必須項目。
 	// コネクタで操作を受けるモードでは、操作できる人のロールが決まらなければ誰も操作できない

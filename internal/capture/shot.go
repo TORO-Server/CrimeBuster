@@ -1,36 +1,32 @@
 package capture
 
 import (
+	"bytes"
 	"context"
 	"crime-buster/internal/config"
 	"crime-buster/internal/detect"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"github.com/chromedp/cdproto/cdp"
-	"github.com/chromedp/cdproto/target"
-	"github.com/chromedp/chromedp"
-	"github.com/chromedp/chromedp/remote"
+	"image"
+	"image/draw"
 	"io"
+	"image/png"
 	"math"
 	"net/http"
-	"net/url"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"time"
 )
 
-// Cam は BlueMap のカメラ。URL の # のあとの値と同じ意味 (BlueMapApp.ts の updatePageAddress)。
+// Cam は Renderer のカメラ。BlueMap のカメラと同じ意味 (中心・距離・向き・見下ろし角) で、
+// Renderer は同じ規則で実効の注視点を決める (docs は TORO-Renderer の render-api)。
 type Cam struct {
 	X, Y, Z float64
 	Dist    float64
 	Rot     float64 // 向き (ラジアン)
 	Angle   float64 // 見下ろす角 (0 が真上、π/2 が水平)
-}
-
-func (c Cam) Hash(mapID string) string {
-	return fmt.Sprintf("#%s:%.0f:%.0f:%.0f:%.0f:%.2f:%.2f:0:0:perspective", mapID, c.X, c.Y, c.Z, c.Dist, c.Rot, c.Angle)
 }
 
 // CamFor は荒らされた場所の中心が画面に収まるカメラ。
@@ -165,55 +161,6 @@ func weightedRadius(cols []detect.Column, cx, cz, p float64) float64 {
 	return 0
 }
 
-// Shooter は BlueMap の web を開いて、画面を撮る (Chromium)。
-// 本番のブラウザは別のコンテナ (BROWSER_URL) で動かす。プレイヤーの置いた看板を読むページを開くので、crime-buster と同じ権限に置かない。
-type Shooter struct {
-	URL     string
-	Browser string // BROWSER_URL。空なら、ローカルの Chromium を起動する (開発用)
-	Resolve string // ローカルの Chromium だけ。"toro-edge:80" のように、URL の名前をこの先へ向ける
-	Chrome  string
-	Flags   []string
-	W, H    int
-	MaxWait time.Duration
-
-	LastOverlay string // 直前に印を描いた結果 (確認用)
-}
-
-func NewShooter(c *config.Config) *Shooter {
-	var flags []string
-	for _, f := range strings.Split(os.Getenv("CHROME_FLAGS"), ",") {
-		if f = strings.TrimSpace(f); f != "" {
-			flags = append(flags, f)
-		}
-	}
-	return &Shooter{URL: c.ShotConfig.BlueMapURL, Browser: c.ShotConfig.BrowserURL, Resolve: c.ShotConfig.BlueMapResolve, Chrome: c.ShotConfig.ChromePath, Flags: flags, W: c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight, MaxWait: c.ShotConfig.ShotSettle}
-}
-
-// OverlayResult は、直前の撮影で印を描いた結果を返す (Shot が LastOverlay に残したもの)。
-func (s *Shooter) OverlayResult() string { return s.LastOverlay }
-
-// tilesLoadedJS は、いま見えている範囲のタイルが全部読み終わったか。
-const tilesLoadedJS = `(() => {
-  const b = window.bluemap;
-  if (!b || !b.mapViewer || !b.mapViewer.map) return false;
-  const m = b.mapViewer.map;
-  const mgrs = [m.hiresTileManager].concat(m.lowresTileManager || []);
-  let n = 0, loading = 0;
-  for (const g of mgrs) {
-    if (!g || !g.tiles) continue;
-    for (const t of g.tiles.values()) { n++; if (t.loading) loading++; }
-  }
-  return n > 0 && loading === 0;
-})()`
-
-// prepareShotJS は、撮る直前に看板を消し (プレイヤーの選んだ画像を証拠に写さない)、操作の部品 (#app 以下) を隠して、地図だけにする。
-const prepareShotJS = `(() => {
-  if (window.marumasign3d) window.marumasign3d.disable();
-  const s = document.createElement('style');
-  s.textContent = '#app{display:none!important}';
-  document.head.appendChild(s);
-})()`
-
 // Pillar は、壊された 1 列 (x, z) とその高さ。画面では、縦の赤い線になる。
 type Pillar struct {
 	X, Z   int
@@ -221,8 +168,8 @@ type Pillar struct {
 	N      int
 }
 
-// Annot は、撮った画面の上に重ねる印。BlueMap は「いまの地形」しか描かないので、穴や欠けだけでは
-// どこが荒らされたか分からない。壊された列を赤い線で、荒らされた範囲を黄色の枠で示す。
+// Annot は、撮った画面の上に重ねる印。地形だけでは、穴や欠けだけではどこが荒らされたか分からない。
+// 壊された列を赤い線で、荒らされた範囲を黄色の枠で示す。
 // 文字は ASCII だけ (実行する環境には日本語のフォントが無い)。
 type Annot struct {
 	Label    string   // 左上に書く 1 行目
@@ -230,7 +177,7 @@ type Annot struct {
 	Pillars  []Pillar // 赤い線 (復旧後の画面では空)
 	Box      [4]int   // 枠: x0, z0, x1, z1
 	BoxY     int      // 枠を置く高さ
-	BoxColor string   // 枠の色 (CSS)
+	BoxColor string   // 枠の色 (CSS の #rrggbb)
 	NoBox    bool     // 枠を描かない (寄った画面では、枠が画面を横切るだけなので)
 }
 
@@ -248,242 +195,97 @@ func AnnotFor(s *detect.Stats, label, sub string, withPillars bool) *Annot {
 	return a
 }
 
-// overlayJS は、いまのカメラの行列で、世界の座標を画面の点にして、全画面の canvas に描く。
-// 返す文字列は、描いた結果 (ok:… または、できなかった理由)。
-const overlayJS = `((a) => {
-  const b = window.bluemap;
-  const cam = b && b.mapViewer && b.mapViewer.camera;
-  if (!cam) return 'no camera';
-  cam.updateMatrixWorld(true);
-  const V = cam.matrixWorldInverse.elements, P = cam.projectionMatrix.elements;
-  const W = window.innerWidth, H = window.innerHeight;
-  const proj = (x, y, z) => {
-    const vx = V[0]*x + V[4]*y + V[8]*z + V[12], vy = V[1]*x + V[5]*y + V[9]*z + V[13],
-          vz = V[2]*x + V[6]*y + V[10]*z + V[14], vw = V[3]*x + V[7]*y + V[11]*z + V[15];
-    const cx = P[0]*vx + P[4]*vy + P[8]*vz + P[12]*vw, cy = P[1]*vx + P[5]*vy + P[9]*vz + P[13]*vw,
-          cw = P[3]*vx + P[7]*vy + P[11]*vz + P[15]*vw;
-    if (!(cw > 0)) return null;
-    return [(cx / cw * 0.5 + 0.5) * W, (1 - (cy / cw * 0.5 + 0.5)) * H];
-  };
-  const cv = document.createElement('canvas');
-  cv.width = W; cv.height = H;
-  cv.style.cssText = 'position:fixed;left:0;top:0;width:' + W + 'px;height:' + H + 'px;z-index:2147483647;pointer-events:none';
-  document.body.appendChild(cv);
-  const g = cv.getContext('2d');
-  let drawn = 0;
-  g.lineCap = 'round';
-  for (const p of (a.pillars || [])) {
-    const lo = proj(p.x + 0.5, p.y0, p.z + 0.5), hi = proj(p.x + 0.5, p.y1 + 1, p.z + 0.5);
-    if (!lo || !hi) continue;
-    g.strokeStyle = 'rgba(255,30,30,0.55)'; g.lineWidth = 4;
-    g.beginPath(); g.moveTo(lo[0], lo[1]); g.lineTo(hi[0], hi[1]); g.stroke();
-    g.fillStyle = 'rgba(255,60,60,0.75)';
-    g.beginPath(); g.arc(hi[0], hi[1], 3, 0, 6.2832); g.fill();
-    drawn++;
-  }
-  const [x0, z0, x1, z1] = a.box || [0, 0, 0, 0], by = a.boxY;
-  const cs = a.box ? [proj(x0, by, z0), proj(x1, by, z0), proj(x1, by, z1), proj(x0, by, z1)] : [];
-  if (a.box && cs.every(Boolean)) {
-    g.beginPath(); g.moveTo(cs[0][0], cs[0][1]); for (let i = 1; i < 4; i++) g.lineTo(cs[i][0], cs[i][1]); g.closePath();
-    g.setLineDash([16, 10]); g.lineWidth = 7; g.strokeStyle = 'rgba(0,0,0,0.7)'; g.stroke();
-    g.lineWidth = 4; g.strokeStyle = a.boxColor; g.stroke(); g.setLineDash([]);
-  }
-  const lines = [a.label, a.sub].filter(Boolean);
-  g.font = 'bold 22px monospace';
-  const tw = Math.max(...lines.map(s => g.measureText(s).width)) + 24;
-  g.fillStyle = 'rgba(10,10,14,0.82)'; g.fillRect(12, 12, tw, 16 + lines.length * 30);
-  lines.forEach((s, i) => { g.fillStyle = i === 0 ? '#ff5a5a' : '#e8e8ee'; g.fillText(s, 24, 42 + i * 30); });
-  return 'ok:' + drawn + ' pillars, box=' + (a.box ? cs.every(Boolean) : 'none');
-})`
+// Shooter は、Renderer に描かせて画面を得る。以前は BlueMap の web をブラウザで開いて撮っていた。
+// Renderer は region ファイルを直接読むので、地図の更新を待つ必要はない。
+// 印は、Renderer が返したカメラの変換を使って、こちらで描く (overlay.go)。
+type Shooter struct {
+	URL string // Renderer の API の接続先 (例 http://toro-renderer:8080)
+	W   int
+	H   int
 
-// overlayArg は、JS に渡す形 (キーは小文字)。
-func (a *Annot) overlayArg() map[string]any {
-	ps := make([]map[string]int, 0, len(a.Pillars))
-	for _, p := range a.Pillars {
-		ps = append(ps, map[string]int{"x": p.X, "z": p.Z, "y0": p.Y0, "y1": p.Y1, "n": p.N})
-	}
-	arg := map[string]any{"label": a.Label, "sub": a.Sub, "pillars": ps, "boxY": a.BoxY, "boxColor": a.BoxColor}
-	if !a.NoBox {
-		arg["box"] = a.Box
-	}
-	return arg
+	hc *http.Client
+
+	LastOverlay string // 直前に印を描いた結果 (確認用)
 }
 
-// browserPathRE は、DevTools のブラウザの接続先のパス。
-var browserPathRE = regexp.MustCompile(`^/devtools/browser/[0-9A-Za-z-]{1,64}$`)
-
-// remoteBrowserURL は、ブラウザのコンテナの /json/version から、接続先のパスだけを読む。
-// あちらはプレイヤーの看板を読む側なので信用しない: 答えのホストは使わず、転送も追わず、形がおかしければエラーにする。
-func remoteBrowserURL(ctx context.Context, browser string) (string, error) {
-	u, err := url.Parse(browser)
-	if err != nil || u.Host == "" {
-		return "", fmt.Errorf("BROWSER_URL の形が正しくありません")
+func NewShooter(c *config.Config) *Shooter {
+	return &Shooter{
+		URL: strings.TrimRight(c.ShotConfig.RendererURL, "/"),
+		W:   c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight,
+		hc: &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
 	}
-	if browserPathRE.MatchString(u.Path) {
-		return browser, nil
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+u.Host+"/json/version", nil)
-	if err != nil {
-		return "", err
-	}
-	req.Host = "localhost" // Chrome は、IP か localhost の Host しか受けない
-	hc := &http.Client{
-		Timeout:       10 * time.Second,
-		Transport:     &http.Transport{DisableKeepAlives: true},
-		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
-	}
-	res, err := hc.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("browser: %w", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("browser: /json/version: HTTP %d", res.StatusCode)
-	}
-	var v struct {
-		WS string `json:"webSocketDebuggerUrl"`
-	}
-	if err := json.NewDecoder(io.LimitReader(res.Body, 64<<10)).Decode(&v); err != nil {
-		return "", fmt.Errorf("browser: /json/version を読めません: %w", err)
-	}
-	w, err := url.Parse(v.WS)
-	if err != nil || !browserPathRE.MatchString(w.Path) {
-		return "", fmt.Errorf("browser: /json/version の接続先の形が正しくありません")
-	}
-	return (&url.URL{Scheme: "ws", Host: u.Host, Path: w.Path}).String(), nil
 }
 
-// openRemote は、別のコンテナのブラウザに、1 枚分の新しいブラウザコンテキストを作る。閉じると、Cookie もキャッシュも残らない。
-func (s *Shooter) openRemote(ctx context.Context) (context.Context, func(), error) {
-	ws, err := remoteBrowserURL(ctx, s.Browser)
-	if err != nil {
-		return nil, nil, err
-	}
-	actx, cancelA := remote.NewAllocator(ctx, ws)
-	cctx, cancelC := chromedp.NewContext(actx, chromedp.WithNewBrowserContext())
-	closeAll := func() { cancelC(); cancelA() }
-	err = chromedp.Do(cctx)
-	if err == nil {
-		return cctx, closeAll, nil
-	}
-	if !strings.Contains(err.Error(), "no browser is open") {
-		closeAll()
-		return nil, nil, fmt.Errorf("browser: %w", err)
-	}
-	// フル版の Chrome は、ウィンドウの無いコンテキストに、新しいウィンドウでしかタブを作れない (headless-shell は newWindow を受けない)
-	c := chromedp.FromContext(cctx)
-	newWindow := true
-	created, err := cdp.Call(cctx, c.Browser, target.CreateTarget, target.CreateTargetParams{
-		URL:              "about:blank",
-		BrowserContextID: c.BrowserContextID,
-		NewWindow:        &newWindow,
+// OverlayResult は、直前の撮影で印を描いた結果を返す (Shot が LastOverlay に残したもの)。
+func (s *Shooter) OverlayResult() string { return s.LastOverlay }
+
+type renderRequest struct {
+	Map      string         `json:"map"`
+	Camera   map[string]any `json:"camera"`
+	Width    int            `json:"width"`
+	Height   int            `json:"height"`
+	Priority string         `json:"priority"`
+	// 何も描かれなかった所は不透明の黒にする (以前の撮影の空の色と同じ)
+	Background []int `json:"background"`
+}
+
+type renderResponse struct {
+	Image      string    `json:"image"`
+	View       []float64 `json:"view"`
+	Projection []float64 `json:"projection"`
+}
+
+// Shot は Renderer に 1 枚描かせ、(ann があれば印を重ねて) PNG を out に書く。
+func (s *Shooter) Shot(ctx context.Context, mapID string, cam Cam, out string, ann *Annot) error {
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	body, err := json.Marshal(renderRequest{
+		Map: mapID,
+		Camera: map[string]any{
+			"target":   []float64{cam.X, cam.Y, cam.Z},
+			"distance": cam.Dist, "rotation": cam.Rot, "angle": cam.Angle,
+		},
+		Width: s.W, Height: s.H, Priority: "high", Background: []int{0, 0, 0},
 	})
 	if err != nil {
-		closeAll()
-		return nil, nil, fmt.Errorf("browser: %w", err)
+		return err
 	}
-	tctx, cancelT := chromedp.NewContext(cctx, chromedp.WithTargetID(created.TargetID))
-	return tctx, func() { cancelT(); closeAll() }, nil
-}
-
-// openBrowser は、撮影 1 回分のブラウザの context を作る。返す関数で閉じる。
-func (s *Shooter) openBrowser(ctx context.Context) (context.Context, func(), error) {
-	if s.Browser != "" {
-		return s.openRemote(ctx)
-	}
-	opts := append([]chromedp.ExecAllocatorOption{}, chromedp.DefaultExecAllocatorOptions[:]...)
-	opts = append(opts, chromedp.WindowSize(s.W, s.H))
-	if s.Chrome != "" {
-		opts = append(opts, chromedp.ExecPath(s.Chrome))
-	}
-	if s.Resolve != "" {
-		if u, err := url.Parse(s.URL); err == nil {
-			opts = append(opts, chromedp.Flag("host-resolver-rules", fmt.Sprintf("MAP %s %s", u.Hostname(), s.Resolve)))
-		}
-	}
-	for _, f := range s.Flags {
-		k, v, hasV := strings.Cut(f, "=")
-		if hasV {
-			opts = append(opts, chromedp.Flag(k, v))
-		} else {
-			opts = append(opts, chromedp.Flag(k, true))
-		}
-	}
-	actx, cancelA := chromedp.NewExecAllocator(ctx, opts...)
-	cctx, cancelC := chromedp.NewContext(actx)
-	return cctx, func() { cancelC(); cancelA() }, nil
-}
-
-// pageURL は撮る地図の URL。?marumasign3d=off で、看板の処理を始めさせない (プレイヤーの指定した画像や動画を、ブラウザに読ませない)。
-func (s *Shooter) pageURL(mapID string, cam Cam) string {
-	return strings.TrimRight(s.URL, "/") + "/?marumasign3d=off" + cam.Hash(mapID)
-}
-
-// Shot は地図を開いて、タイルが読み終わるまで待ち、(ann があれば印を重ねて) PNG を out に書く。
-func (s *Shooter) Shot(ctx context.Context, mapID string, cam Cam, out string, ann *Annot) error {
-	cctx, closeBrowser, err := s.openBrowser(ctx)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.URL+"/v1/render", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	defer closeBrowser()
-	cctx, cancelT := context.WithTimeout(cctx, s.MaxWait+90*time.Second)
-	defer cancelT()
-
-	target := s.pageURL(mapID, cam)
-	// 画面の大きさは、起動のフラグではなく emulation で決める (別のコンテナのブラウザのフラグは変えられない)
-	if err := chromedp.Do(cctx,
-		chromedp.EmulateViewport(int64(s.W), int64(s.H)),
-		chromedp.Navigate(target),
-		chromedp.WaitVisible(chromedp.CSS("#map-container")),
-	); err != nil {
-		return fmt.Errorf("open %s: %w", target, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := s.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("renderer: %w", err)
 	}
-
-	// 読み込み中の見え方が安定するまで (タイルが全部読み終わるまで) 待つ
-	deadline := time.Now().Add(s.MaxWait)
-	stable := 0
-	for time.Now().Before(deadline) {
-		ok, err := chromedp.Run(cctx, chromedp.Evaluate[bool](tilesLoadedJS))
-		if err != nil {
-			return err
-		}
-		if ok {
-			stable++
-			if stable >= 3 {
-				break
-			}
-		} else {
-			stable = 0
-		}
-		select {
-		case <-time.After(1500 * time.Millisecond):
-		case <-cctx.Done():
-			return cctx.Err()
-		}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("renderer: HTTP %d", resp.StatusCode)
 	}
-
-	if ann != nil {
-		arg, err := json.Marshal(ann.overlayArg())
-		if err != nil {
-			return err
-		}
-		// 印が描けなくても、印の無い画面は撮る (無いよりよい)。結果は LastOverlay に残す
-		res, err := chromedp.Run(cctx, chromedp.Evaluate[string](overlayJS+"("+string(arg)+")"))
-		if err != nil {
-			res = "failed: " + err.Error()
-		}
-		s.LastOverlay = res
+	var rr renderResponse
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<27)).Decode(&rr); err != nil {
+		return fmt.Errorf("renderer: 応答を読めません: %w", err)
 	}
-
-	if err := chromedp.Do(cctx,
-		chromedp.Evaluate[chromedp.Void](prepareShotJS),
-		chromedp.Sleep(1500*time.Millisecond),
-	); err != nil {
-		return err
+	raw, err := base64.StdEncoding.DecodeString(rr.Image)
+	if err != nil {
+		return fmt.Errorf("renderer: 画像を読めません: %w", err)
 	}
-	buf, err := chromedp.Run(cctx, chromedp.FullScreenshot(100)) // 100 は PNG
+	if ann == nil {
+		return os.WriteFile(out, raw, 0o644)
+	}
+	img, err := png.Decode(bytes.NewReader(raw))
+	if err != nil {
+		return fmt.Errorf("renderer: PNG を読めません: %w", err)
+	}
+	base := image.NewRGBA(img.Bounds())
+	draw.Draw(base, base.Bounds(), img, img.Bounds().Min, draw.Src)
+	res := drawOverlay(base, rr.View, rr.Projection, ann)
+	s.LastOverlay = res
+	f, err := os.Create(out)
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(out, buf, 0o644)
+	defer f.Close()
+	return png.Encode(f, base)
 }

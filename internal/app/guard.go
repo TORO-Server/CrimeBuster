@@ -6,13 +6,12 @@ import (
 	"crime-buster/internal/config"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
+	"crime-buster/internal/console"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
 	"crime-buster/internal/store"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"math"
 	"os"
 	"strings"
 	"sync"
@@ -45,23 +44,22 @@ type Guard struct {
 	opMu  sync.Mutex // 時間のかかる処理 (事件の処理、ロールバック、撮影) を 1 つずつにする。キックとミュートは、これを待たない
 	recMu sync.Mutex // 事件の記録 (record.json) の読み書き
 
-	lastRefresh         time.Time     // 最後に書き出しと地図の更新を頼んだ時刻 (g.opMu を持って触る)
-	refreshEvery        time.Duration // 書き出しと地図の更新の間隔
-	rollbackConfirmWait time.Duration // データベースでロールバックを確かめ直す間隔
+	lastRefresh         time.Time     // 最後に書き出しを頼んだ時刻 (g.opMu を持って触る)
+	refreshEvery        time.Duration // 書き出しの間隔
+	rollbackConfirmWait     time.Duration // データベースでロールバックを確かめ直す間隔
+	rollbackConfirmDeadline time.Duration // データベースで確かめ続ける上限
 }
 
 const (
 	// incidentDeadline は、1 件の処理の全体の期限。これを超えて g.opMu を持ち続けない。
 	incidentDeadline = 30 * time.Minute
-	// refreshInterval は、save-all flush と bluemap update の間隔。事件が続いても、サーバーへの負荷を増やさない。
+	// refreshInterval は、save-all flush の間隔。事件が続いても、サーバーへの負荷を増やさない。
 	refreshInterval = time.Minute
-	// rollbackConfirmTries は、ロールバックをデータベースで確かめる回数。
-	rollbackConfirmTries = 7
 	// healthEvery は、監視が回っている印を書く間隔。
 	healthEvery = 30 * time.Second
 )
 
-func NewGuard(cfg *config.Config, cp *detect.CP, st *store.Store, ops *relay.Ops, sh *capture.Shooter, rep *notify.Reporter, log *slog.Logger) *Guard {
+func NewGuard(cfg *config.Config, cp *detect.CP, st *store.Store, ops *console.Ops, sh *capture.Shooter, rep *notify.Reporter, log *slog.Logger) *Guard {
 	return newGuard(cfg, st, log, ports{
 		cp:       readerOrNil(cp),
 		ai:       judgeOrNil(notify.NewAI(cfg)),
@@ -87,7 +85,7 @@ func newGuard(cfg *config.Config, st *store.Store, log *slog.Logger, p ports) *G
 		warps:      store.LoadWarps(cfg.StorageConfig.WarpsDir),
 		log:        log,
 		suppressed: map[int]int64{}, queue: make(chan *store.Incident, 16), busy: map[string]string{},
-		refreshEvery: refreshInterval, rollbackConfirmWait: 5 * time.Second,
+		refreshEvery: refreshInterval, rollbackConfirmWait: 5 * time.Second, rollbackConfirmDeadline: 10 * time.Minute,
 	}
 	g.incidents = &IncidentService{g: g, cp: p.cp, ai: p.ai, console: p.console, shooter: p.shooter, reporter: p.reporter}
 	g.chat = &ChatService{g: g, cp: p.cp, ai: p.ai, console: p.console, reporter: p.reporter}
@@ -125,7 +123,7 @@ func shooterOrNil(s *capture.Shooter) Shooter {
 	return s
 }
 
-func consoleOrNil(ops *relay.Ops) Console {
+func consoleOrNil(ops *console.Ops) Console {
 	if ops == nil {
 		return nil
 	}
@@ -367,7 +365,7 @@ func (g *Guard) handle(ctx context.Context, inc *store.Incident) {
 	}
 }
 
-// waitRefresh は、書き出しと地図の更新の間隔を空ける (g.opMu を持って呼ぶ)。
+// waitRefresh は、書き出しの間隔を空ける (g.opMu を持って呼ぶ)。
 func (g *Guard) waitRefresh(ctx context.Context) error {
 	if wait := time.Until(g.lastRefresh.Add(g.refreshEvery)); wait > 0 {
 		select {
@@ -378,12 +376,6 @@ func (g *Guard) waitRefresh(ctx context.Context) error {
 	}
 	g.lastRefresh = time.Now()
 	return nil
-}
-
-// blueMapArea は、描き直す範囲。中心はカメラ (壊した数の中央値) で、半径は MaxBlueMapRadius まで。
-func blueMapArea(s *detect.Stats, cam capture.Cam) (cx, cz, radius int) {
-	radius = max(max(s.X1-s.X0, s.Z1-s.Z0)/2+48, 64)
-	return int(math.Round(cam.X)), int(math.Round(cam.Z)), min(radius, domain.MaxBlueMapRadius)
 }
 
 func writeJSON(path string, v any) error {
@@ -420,7 +412,7 @@ func (g *Guard) Shooter() *capture.Shooter {
 }
 
 // Ops は、コンソール操作の部品を返す (無いときは nil)。
-func (g *Guard) Ops() *relay.Ops {
+func (g *Guard) Ops() *console.Ops {
 	c, _ := g.console.(opsConsole)
 	return c.ops
 }
@@ -449,6 +441,9 @@ func (g *Guard) UnlockOp() { g.opMu.Unlock() }
 
 // SetRollbackConfirmWait は、ロールバックの確認待ち時間を差し替える (試験用)。
 func (g *Guard) SetRollbackConfirmWait(d time.Duration) { g.rollbackConfirmWait = d }
+
+// SetRollbackConfirmDeadline は、ロールバックを確かめ続ける上限を差し替える (試験用)。
+func (g *Guard) SetRollbackConfirmDeadline(d time.Duration) { g.rollbackConfirmDeadline = d }
 
 // SetShooter は、撮影の部品を差し替える (試験用)。
 func (g *Guard) SetShooter(s *capture.Shooter) {

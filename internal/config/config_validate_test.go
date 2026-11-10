@@ -14,7 +14,7 @@ var configEnvNames = []string{
 	"AI_API_KEY", "AI_API_KEY_FILE", "ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY_FILE", "AI_BASE_URL", "AI_MODEL", "AI_MIN_CONFIDENCE", "AI_REQUIRED", "AI_CHAT",
 	"CHAT_ENABLED", "CHAT_RATE", "CHAT_RATE_WINDOW", "CHAT_REPEAT", "CHAT_REPEAT_WINDOW", "CHAT_RUN", "CHAT_LINK_REPEAT", "CHAT_BAD_WORDS_FILE", "CHAT_QUIET", "CHAT_MUTE_CMD", "CHAT_MUTE_TAG_ID",
 	"DISCORD_BOT_TOKEN", "DISCORD_BOT_TOKEN_FILE", "DISCORDSRV_CONFIG", "REPORT_CHANNEL_ID", "ROLLBACK_TAG_ID", "DISCORD_MCP_URL", "DISCORD_MCP_LAZY", "MCP_PROTOCOL_VERSION",
-	"CONSOLE_URL", "KICK_ENABLED", "BLUEMAP_URL", "BROWSER_URL", "BLUEMAP_RESOLVE", "MAP_IDS", "CHROME_PATH", "SHOT_WIDTH", "SHOT_HEIGHT", "SHOT_SETTLE",
+	"RCON_ADDR", "RCON_PASSWORD", "RCON_PASSWORD_FILE", "KICK_ENABLED", "RENDERER_URL", "MAP_IDS", "SHOT_WIDTH", "SHOT_HEIGHT",
 	"CONNECTOR_ADDR", "AUTH_INTERNAL_URL", "ADMIN_ROLE_IDS", "CONNECTOR_REQUIRE_LIVE_ROLES", "CONNECTOR_DISCORD_ALLOW", "WARPS_DIR", "DATA_DIR", "REPORT_RETENTION",
 }
 
@@ -50,9 +50,9 @@ func validConfig(mode Mode) *Config {
 			DiscordSRVConfig: "/discordsrv/config.yml",
 			DiscordMCPURL:    "http://discord-mcp:8085/mcp", DiscordMCPLazy: true, MCPProtocol: "2025-11-25",
 		},
-		ConsoleConfig: ConsoleConfig{ConsoleURL: "http://toro-console:8091"},
+		ConsoleConfig: ConsoleConfig{RconAddr: "toro-main:25575", RconPassword: "test-password"},
 		ShotConfig: ShotConfig{
-			BlueMapURL: "http://3d-map.torosaba.net", ShotWidth: 1280, ShotHeight: 720, ShotSettle: 60 * time.Second,
+			RendererURL: "http://toro-renderer:8080", ShotWidth: 1280, ShotHeight: 720,
 		},
 		ConnectorConfig: ConnectorConfig{
 			Addr: ":8090", AuthInternalURL: "http://toro-auth:8081",
@@ -103,15 +103,14 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"ai min confidence high", func(c *Config) { c.AIConfig.AIMinConf = 101 }, "AI_MIN_CONFIDENCE"},
 		{"ai min confidence low", func(c *Config) { c.AIConfig.AIMinConf = -1 }, "AI_MIN_CONFIDENCE"},
 		{"ai base url", func(c *Config) { c.AIConfig.AIBaseURL = "example.com" }, "AI_BASE_URL"},
-		{"bluemap url", func(c *Config) { c.ShotConfig.BlueMapURL = "ftp://example.com" }, "BLUEMAP_URL"},
-		{"console url", func(c *Config) { c.ConsoleConfig.ConsoleURL = "://bad" }, "CONSOLE_URL"},
+		{"renderer url", func(c *Config) { c.ShotConfig.RendererURL = "ftp://example.com" }, "RENDERER_URL"},
+		{"rcon addr", func(c *Config) { c.ConsoleConfig.RconAddr = "toro-main" }, "RCON_ADDR"},
+		{"rcon addr port", func(c *Config) { c.ConsoleConfig.RconAddr = "toro-main:0" }, "RCON_ADDR"},
 		{"auth url", func(c *Config) { c.ConnectorConfig.AuthInternalURL = "toro-auth:8081" }, "AUTH_INTERNAL_URL"},
 		{"discord mcp url", func(c *Config) { c.DiscordConfig.DiscordMCPURL = "ws://example.com" }, "DISCORD_MCP_URL"},
-		{"browser url", func(c *Config) { c.ShotConfig.BrowserURL = "http://example.com" }, "BROWSER_URL"},
 		{"connector addr no port", func(c *Config) { c.ConnectorConfig.Addr = "8090" }, "CONNECTOR_ADDR"},
 		{"connector addr port zero", func(c *Config) { c.ConnectorConfig.Addr = ":0" }, "CONNECTOR_ADDR"},
 		{"discord allow", func(c *Config) { c.ConnectorConfig.DiscordAllow = "[invalid" }, "CONNECTOR_DISCORD_ALLOW"},
-		{"shot settle", func(c *Config) { c.ShotConfig.ShotSettle = -time.Second }, "SHOT_SETTLE"},
 		{"report retention", func(c *Config) { c.RetentionConfig.ReportRetention = -time.Hour }, "REPORT_RETENTION"},
 	}
 	for _, tc := range cases {
@@ -171,6 +170,27 @@ func TestValidateCapabilityRequirements(t *testing.T) {
 			t.Errorf("%s must not require posting settings: %v", mode, err)
 		}
 	}
+
+	// コンソールを使うモード (操作を受ける review、自動の live) では RCON の接続先とパスワードが必須。
+	for _, mode := range []Mode{ModeReview, ModeLive} {
+		c = validConfig(mode)
+		c.ConsoleConfig.RconAddr = ""
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "RCON_ADDR") {
+			t.Errorf("%s must require RCON_ADDR: %v", mode, err)
+		}
+		c = validConfig(mode)
+		c.ConsoleConfig.RconPassword = ""
+		if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "RCON_PASSWORD") {
+			t.Errorf("%s must require RCON_PASSWORD: %v", mode, err)
+		}
+	}
+	for _, mode := range []Mode{ModeObserve, ModeDryRun} {
+		c = validConfig(mode)
+		c.ConsoleConfig.RconAddr, c.ConsoleConfig.RconPassword = "", ""
+		if err := c.Validate(); err != nil {
+			t.Errorf("%s must not require RCON settings: %v", mode, err)
+		}
+	}
 }
 
 func TestValidateAggregatesErrors(t *testing.T) {
@@ -221,8 +241,11 @@ func TestLoadConfigDefaults(t *testing.T) {
 		c.DiscordConfig.DiscordMCPURL != "http://discord-mcp:8085/mcp" || !c.DiscordConfig.DiscordMCPLazy {
 		t.Errorf("discord defaults: %+v", c.DiscordConfig)
 	}
-	if c.ConsoleConfig.ConsoleURL != "http://toro-console:8091" {
+	if c.ConsoleConfig.RconAddr != "" || c.ConsoleConfig.RconPassword != "" {
 		t.Errorf("console defaults: %+v", c.ConsoleConfig)
+	}
+	if c.ShotConfig.RendererURL != "" {
+		t.Errorf("shot defaults: %+v", c.ShotConfig)
 	}
 	if c.ShotConfig.ShotWidth != 1280 || c.ShotConfig.ShotHeight != 720 || c.ShotConfig.MapIDs["main"] != "overworld" {
 		t.Errorf("shot defaults: %+v", c.ShotConfig)
@@ -244,6 +267,8 @@ func TestLoadConfigCapabilityRequirements(t *testing.T) {
 	}
 	t.Setenv("ADMIN_ROLE_IDS", "111111111111111111")
 	t.Setenv("REPORT_CHANNEL_ID", "222222222222222222")
+	t.Setenv("RCON_ADDR", "toro-main:25575")
+	t.Setenv("RCON_PASSWORD", "test-password")
 	c, err := LoadConfig()
 	if err != nil || c.Mode != ModeReview {
 		t.Fatalf("review with IDs must load: %v %v", c, err)

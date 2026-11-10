@@ -1,6 +1,6 @@
 # CrimeBuster — 荒らしを見つけて、証拠の画像を付けて通報し、ロールバックする
 
-Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (BlueMap の 3D の地図) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。イメージの中身は、実行ファイルと CA 証明書だけ (FROM scratch、非 root)。
+Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (TORO-Renderer が描く 3D の画面) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。イメージの中身は、実行ファイルと CA 証明書だけ (FROM scratch、非 root)。ブラウザも Docker のソケットも持たない (コンソールへは RCON で送る)。
 
 動かし方は 4 つ (モード) あり、検知して記録するだけの `observe` から、投稿とロールバックまで自動で行う `live` まで、段階を上げて使う。人か AI が確認してから決める運用では `review` を使い、事件は「確認待ち」になり、コネクタの HTTP API 経由で通報・ロールバック・却下を決める。
 
@@ -22,9 +22,8 @@ Minecraft サーバーの CoreProtect の記録を監視し、人の手では出
 | [docs/detection.md](docs/detection.md) | 検知の仕様 (ブロック変更、チャット) |
 | [docs/connector-api.md](docs/connector-api.md) | コネクタの HTTP API の仕様 (経路、認証、認可、監査) と、コネクタ経由で操作する手順 |
 | [docs/reporting.md](docs/reporting.md) | 通報の仕様 (Discord への投稿、MCP 経由の投稿、AI 判定の位置付け) |
-| [docs/console-relay.md](docs/console-relay.md) | コンソール中継のプロトコル |
 | [docs/operations.md](docs/operations.md) | 導入手順、データの保持期間、ヘルスチェック、限界 |
-| [docs/development.md](docs/development.md) | ビルド、テスト、実ブラウザ試験の条件、過去の記録で見積もりを取るコマンド |
+| [docs/development.md](docs/development.md) | ビルド、テスト、過去の記録で見積もりを取るコマンド |
 | [docs/verification/](docs/verification/) | 日付付きの検証記録 (履歴。規範ではない) |
 | [CHANGELOG.md](CHANGELOG.md) | 版と変更の対応 |
 
@@ -41,5 +40,5 @@ Minecraft サーバーの CoreProtect の記録を監視し、人の手では出
 | コネクタの経路 | `internal/connector` | `docs/connector-api.md` |
 | 認可の条件 | `internal/connector` の認可 | `docs/connector-api.md` の認可の節 |
 | 通報文の形式 | `internal/notify` | `docs/reporting.md` |
-| コンソール中継で許可するコマンド | `internal/relay` | `docs/console-relay.md` |
+| コンソールで許可するコマンド | `internal/console` | `docs/architecture.md` の用語の節 |
 | データの保持期間 | `internal/config` の保持グループと `internal/app` の保持処理 | `docs/operations.md` |
