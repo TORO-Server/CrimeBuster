@@ -94,24 +94,25 @@
 
 ### コンソール
 
+コンソールへは Paper 標準の RCON で直接送る。送れるコマンドは、送る前に許可リストで確かめる (許可する形は architecture を参照)。
+コンソールを使うモード (操作を受ける review、自動の live) では、`RCON_ADDR` と `RCON_PASSWORD` が必須である。
+
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
-| `CONSOLE_URL` | `http://toro-console:8091` | コンソール中継の接続先 |
+| `RCON_ADDR` | (空) | RCON の接続先 (`host:port`)。空ならコンソールを使わない |
+| `RCON_PASSWORD` | (空) | RCON のパスワード。ホスト側の env_file で渡す (`RCON_PASSWORD_FILE` でファイルからも読める) |
 | `KICK_ENABLED` | `false` | live で、検知したらすぐキックするか |
 
 ### 撮影
 
+撮影は TORO-Renderer の描画 API に頼む。Renderer は region ファイルを直接読むので、地図の更新を待つ必要はない。
+
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
-| `BLUEMAP_URL` | `http://3d-map.torosaba.net` | 画面を撮る地図の接続先 |
-| `BROWSER_URL` | (空) | 画面を撮るブラウザの接続先 (例 `ws://toro-chrome:9222`)。空ならローカルの Chromium を起動する (開発用) |
-| `BLUEMAP_RESOLVE` | (空) | ローカルの Chromium のときだけ。地図のホスト名の向け先 |
-| `MAP_IDS` | `main=overworld` | ワールド名と地図の名前の対応 (コンマ区切り) |
-| `CHROME_PATH` | (空) | ローカルの Chromium の場所。空なら探す |
-| `CHROME_FLAGS` | (空) | ローカルの Chromium のときだけ。追加のフラグ (コンマ区切り) |
+| `RENDERER_URL` | (空) | Renderer の API の接続先 (例 `http://toro-renderer:8080`) |
+| `MAP_IDS` | `main=overworld` | ワールド名と Renderer のマップ名の対応 (コンマ区切り) |
 | `SHOT_WIDTH` | `1280` | 画像の幅 |
 | `SHOT_HEIGHT` | `720` | 画像の高さ |
-| `SHOT_SETTLE` | `60s` | タイルを待つ最大の時間 |
 
 ### 保存先と保持
 
@@ -120,17 +121,6 @@
 | `WARPS_DIR` | (空) | ワープの一覧のフォルダ。報告に「ワープ ○○ の近く」と書くために読む |
 | `DATA_DIR` | `/data` | 状態と報告のフォルダ |
 | `REPORT_RETENTION` | `2160h` (90 日) | 事件のフォルダを残す長さ。`0` なら消さない |
-
-### コンソール中継 (`console-relay` が読むもの)
-
-中継は本体とは別のプロセスで、設定も別である。
-
-| 名前 | 既定 | 意味 |
-| --- | --- | --- |
-| `CONSOLE_ADDR` | `:8091` | 中継の待ち受けアドレス |
-| `DOCKER_SOCKET` | `/var/run/docker.sock` | Docker のソケット |
-| `MC_CONTAINER` | `toro-main` | つなぐコンテナ |
-| `CHAT_MUTE_CMD` | (空) | 許可するミュートのコマンドの形。本体と同じ値を渡す。空ならミュートは通さない |
 
 <!-- config-check:end -->
 
@@ -158,9 +148,4 @@
 | --- | --- |
 | `CRIMEBUSTER_CONNECTOR_URL` | コネクタの接続先。連携先の MCP サーバーにこれを渡すと、管理用のツールが有効になる |
 
-### テスト専用の設定
 
-| 名前 | 意味 |
-| --- | --- |
-| `BROWSER_TEST_URL` | 実ブラウザ試験で使うブラウザの接続先。設定したときだけ、その試験が動く |
-| `CHROME_TEST_PATH` | 実ブラウザ試験で使う Chromium の場所 |

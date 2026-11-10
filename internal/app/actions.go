@@ -7,8 +7,9 @@ import (
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
+	"crime-buster/internal/console"
 	"crime-buster/internal/store"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -123,7 +124,7 @@ func (s *IncidentService) ReportIncident(ctx context.Context, id, by, note strin
 		// t: は「実行するときから何秒前まで」なので、検知のときの秒数のままだと、後で実行すると荒らしの始まりに届かない
 		now := time.Now().Unix()
 		seconds := int(now-rec.Start) + reportCmdMargin
-		rec.RollbackCmd, rec.RestoreCmd = relay.RollbackCmd(rec.Name, seconds, rec.World), relay.RestoreCmd(rec.Name, seconds, rec.World)
+		rec.RollbackCmd, rec.RestoreCmd = console.RollbackCmd(rec.Name, seconds, rec.World), console.RestoreCmd(rec.Name, seconds, rec.World)
 		out := notify.Outcome{Cmd: rec.RollbackCmd, RestoreCmd: rec.RestoreCmd, RolledBack: rec.RolledBack, AI: rec.AI, Planned: !rec.RolledBack, CmdUntil: now + reportCmdMargin}
 		if rec.RolledBack {
 			done, total, derr := s.cp.RolledBack(ctx, rec.UserID, rec.World, rec.Start-2, rec.End)
@@ -243,27 +244,45 @@ func (s *IncidentService) rollbackable(id string) (*domain.Record, error) {
 	return rec, nil
 }
 
-// rollbackVerified は、ロールバックが効いたかの判定。基準はデータベース (コンソールの行は、発言や切断で誤ることがある)。
-// データベースを読めないときだけ、コンソールの「完了」の行を信じる。
+// rollbackVerified は、ロールバックが効いたかの判定。基準はデータベース。
+// RCON の応答は「送れた」ことまでしか分からないので、データベースが読めないときは
+// 成功にしない (以前はコンソールの「完了」の行を信じる作りだったが、その行は RCON には届かない)。
 func rollbackVerified(consoleErr error, done, total int, dbErr error) bool {
 	if dbErr != nil {
-		return consoleErr == nil
+		return false
 	}
 	return total > 0 && done*100/total >= 95
 }
 
-// confirmRollback はデータベースで確かめる。CoreProtect の書き込みが少し遅れることがあるので、コンソールが「完了」のときは何度か読む。
+// confirmRollback はデータベースで確かめる。ほぼ全部が戻り、その数が 2 回続けて
+// 変わらなければ成功とする (データベースの印が、ワールドの変更より先に付く場合があるため)。
+// ロールバックはサーバー側で非同期に進むので、完了まで数分かかることがある。
+// 応答に失敗の文面があったとき (ErrRollbackFailed) だけは、始まっていないので確かめずに返す。
+// 転送の失敗は、コマンドが届いたかどうかが分からないので、同じく確かめ続ける。
 func (s *IncidentService) confirmRollback(ctx context.Context, consoleErr error, userID int, world string, from, to int64) (done, total int, ok bool, dbErr error) {
-	for try := 0; ; try++ {
+	if errors.Is(consoleErr, console.ErrRollbackFailed) {
 		done, total, dbErr = s.cp.RolledBack(ctx, userID, world, from, to)
-		ok = rollbackVerified(consoleErr, done, total, dbErr)
-		if ok || consoleErr != nil || try >= rollbackConfirmTries-1 {
-			return
+		return done, total, false, dbErr
+	}
+	deadline := time.Now().Add(s.g.rollbackConfirmDeadline)
+	prevDone := -1
+	for {
+		done, total, dbErr = s.cp.RolledBack(ctx, userID, world, from, to)
+		if rollbackVerified(nil, done, total, dbErr) {
+			if done == prevDone {
+				return done, total, true, dbErr
+			}
+			prevDone = done
+		} else {
+			prevDone = -1
+		}
+		if time.Now().After(deadline) {
+			return done, total, false, dbErr
 		}
 		select {
 		case <-time.After(s.g.rollbackConfirmWait):
 		case <-ctx.Done():
-			return
+			return done, total, false, dbErr
 		}
 	}
 }
@@ -296,7 +315,7 @@ func (s *IncidentService) runRollback(ctx context.Context, rec *domain.Record) (
 		return note, nil
 	}
 	out := filepath.Join(s.g.ReportDir(rec.ID), "restored.png")
-	got := s.bluemapShot(ctx, s.g.cfg.ShotConfig.MapIDs[stats.World], stats, capture.CamFor(stats), out,
+	got := s.rendererShot(ctx, s.g.cfg.ShotConfig.MapIDs[stats.World], stats, capture.CamFor(stats), out,
 		capture.AnnotFor(stats, fmt.Sprintf("%s  RESTORED (rollback done)", stats.User.Name), "yellow = affected area", false), true)
 	if got != "" {
 		_, _ = s.g.update(rec.ID, func(r *domain.Record) error {
@@ -313,12 +332,12 @@ func (s *IncidentService) runRollback(ctx context.Context, rec *domain.Record) (
 }
 
 // Mute は、ミュートのコマンド (CHAT_MUTE_CMD) を送る。急ぐ操作なので、事件の処理 (s.g.opMu) を待たない。
-// コンソールの行は返さない (発言やアドレスが混ざる)。
+// RCON の応答は捨てる (報告やログに載せない)。
 func (s *IncidentService) Mute(ctx context.Context, name, by, reason string) error {
 	if err := s.CheckMode(); err != nil {
 		return err
 	}
-	cmd := relay.MuteCommand(s.g.cfg.ChatConfig.ChatMuteCmd, name)
+	cmd := console.MuteCommand(s.g.cfg.ChatConfig.ChatMuteCmd, name)
 	switch {
 	case s.console == nil:
 		return fmt.Errorf("%w: Minecraft のコンソールにつなげない設定です", domain.ErrUnavailable)
@@ -329,7 +348,7 @@ func (s *IncidentService) Mute(ctx context.Context, name, by, reason string) err
 	case s.g.Protected(name):
 		return fmt.Errorf("%w: %s は信頼する人 (または op) です", domain.ErrForbidden, name)
 	}
-	if _, err := s.console.Run(ctx, cmd, relay.SendOnlyTimeout, nil); err != nil {
+	if _, err := s.console.Run(ctx, cmd); err != nil {
 		return err
 	}
 	s.g.log.Warn("ミュートした", "player", name, "by", by, "reason", domain.CleanText(reason, 100))
@@ -349,7 +368,7 @@ func (s *IncidentService) Kick(ctx context.Context, name, by, reason string) err
 	case s.g.Protected(name):
 		return fmt.Errorf("%w: %s は信頼する人 (または op) です", domain.ErrForbidden, name)
 	}
-	reason = domain.CleanText(reason, relay.MaxKickReason)
+	reason = domain.CleanText(reason, console.MaxKickReason)
 	if reason == "" {
 		reason = "運営の判断による"
 	}

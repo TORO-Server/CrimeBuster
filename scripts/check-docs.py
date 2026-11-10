@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """文書の照合。
 
-1. コード (internal/config、internal/relay、internal/capture) が読む環境変数の集合と、
+1. コード (internal/config、internal/capture) が読む環境変数の集合と、
    docs/configuration.md の「このプログラムの設定」 (config-check の印の範囲) に
    書かれた名前の集合が一致することを確かめる。
 2. 廃止した用語が、文書とコードに再混入していないことを確かめる。
@@ -18,7 +18,6 @@ ROOT = Path(__file__).resolve().parent.parent
 # 環境変数の読み取りがあるファイル。新しい読み取りを足すときは、ここにも足す。
 CODE_FILES = [
     "internal/config/config.go",
-    "internal/relay/relay.go",
     "internal/capture/shot.go",
 ]
 

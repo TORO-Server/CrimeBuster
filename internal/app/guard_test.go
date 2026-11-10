@@ -2,12 +2,11 @@ package app
 
 import (
 	"context"
-	"crime-buster/internal/capture"
 	"crime-buster/internal/config"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
 	"crime-buster/internal/store"
 	"crime-buster/internal/testutil"
 	"database/sql/driver"
@@ -37,7 +36,7 @@ func TestRollbackVerified(t *testing.T) {
 		{"行が無い", nil, 0, 0, nil, false},
 		{"コンソールが切れてもデータベースで戻っている", consoleNG, 100, 100, nil, true},
 		{"コンソールが切れてデータベースでも戻っていない", consoleNG, 0, 100, nil, false},
-		{"データベースが読めないときはコンソールの完了", nil, 0, 0, dbDown, true},
+		{"データベースが読めなければ、コンソールの送信成功だけでは成功にしない", nil, 0, 0, dbDown, false},
 		{"どちらも確かめられない", consoleNG, 0, 0, dbDown, false},
 	} {
 		if got := rollbackVerified(c.console, c.done, c.total, c.db); got != c.want {
@@ -57,27 +56,6 @@ func TestLoadOps(t *testing.T) {
 	}
 	if len(LoadOps("")) != 0 || len(LoadOps(t.TempDir()+"/none.json")) != 0 {
 		t.Fatal("missing file must be empty")
-	}
-}
-
-func TestBlueMapAreaIsCapped(t *testing.T) {
-	// 遠くに 1 個だけ壊すと範囲は広がるが、半径は上限で止まり、中心はカメラ (中央値) のまま
-	s := &detect.Stats{X0: -30000, X1: 30000, Z0: 0, Z1: 10}
-	for x := 95; x <= 105; x++ {
-		s.Columns = append(s.Columns, detect.Column{X: x, Z: 5, N: 50})
-	}
-	s.Columns = append(s.Columns, detect.Column{X: -30000, Z: 0, N: 1}, detect.Column{X: 30000, Z: 10, N: 1})
-	cx, cz, r := blueMapArea(s, capture.CamFor(s))
-	if r != domain.MaxBlueMapRadius || cx < 95 || cx > 105 || cz != 5 {
-		t.Fatalf("cx=%d cz=%d r=%d", cx, cz, r)
-	}
-	// 狭い範囲は、今までどおり
-	small := &detect.Stats{X0: 0, X1: 100, Z0: 0, Z1: 20}
-	if _, _, r := blueMapArea(small, capture.Cam{X: 50, Z: 10}); r != 98 {
-		t.Fatalf("r=%d", r)
-	}
-	if _, _, r := blueMapArea(&detect.Stats{}, capture.Cam{}); r != 64 {
-		t.Fatalf("最小の半径: %d", r)
 	}
 }
 
@@ -260,7 +238,7 @@ func newDBGuard(t *testing.T, mode config.Mode, answers ...testutil.FakeAnswer) 
 	cp := detect.NewCP(sqldb, "coreprotect_")
 	con := &testutil.FakeConsole{}
 	cfg := &config.Config{Mode: mode, StorageConfig: config.StorageConfig{DataDir: dir}, DetectConfig: config.DetectConfig{WEGrace: 30 * time.Minute, TrustedPlayers: map[string]bool{}}, ChatConfig: config.ChatConfig{ChatMuteCmd: "mute {name} 10m spam"}, ShotConfig: config.ShotConfig{MapIDs: map[string]string{}}}
-	g := NewGuard(cfg, cp, st, &relay.Ops{C: con}, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	g := NewGuard(cfg, cp, st, &console.Ops{C: con}, nil, nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
 	g.rollbackConfirmWait = time.Millisecond
 	return g, con, db
 }

@@ -1,7 +1,6 @@
 // crime-buster: TORO サーバーの荒らしを監視し、証拠の画像を付けて通報し、ロールバックする。
 //
 //	crime-buster run                    監視を続ける (CRIMEBUSTER_MODE=observe | dry-run | live)
-//	crime-buster console-relay          コンソールの中継を開く (Docker のソケットを持つ別のコンテナで動かす)
 //	crime-buster check [-console]       設定・データベース・Discord のトークンとチャンネルを確かめる (何も投稿しない)
 //	crime-buster replay -user NAME -from RFC3339 -to RFC3339 [-out DIR] [-no-shot]
 //	                                  過去の記録に閾値を当てはめ、画像と報告文を DIR に作る (投稿・ロールバックはしない)
@@ -13,9 +12,9 @@ import (
 	"crime-buster/internal/capture"
 	"crime-buster/internal/config"
 	"crime-buster/internal/connector"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
 	"crime-buster/internal/store"
 	"flag"
 	"fmt"
@@ -32,15 +31,13 @@ var version = "dev"
 func main() {
 	log := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	if len(os.Args) < 2 {
-		fmt.Fprintln(os.Stderr, "usage: crime-buster run | console-relay | check | replay | healthcheck")
+		fmt.Fprintln(os.Stderr, "usage: crime-buster run | check | replay | healthcheck")
 		os.Exit(2)
 	}
 	var err error
 	switch os.Args[1] {
 	case "run":
 		err = cmdRun(log)
-	case "console-relay":
-		err = relay.CmdConsoleRelay(log)
 	case "check":
 		err = cmdCheck(log, os.Args[2:])
 	case "replay":
@@ -95,12 +92,19 @@ func cmdRun(log *slog.Logger) error {
 		return err
 	}
 
-	var ops *relay.Ops
+	var ops *console.Ops
 	var sh *capture.Shooter
 	var rep *notify.Reporter
 	caps := config.CapabilitiesFor(cfg.Mode)
 	if caps.Capture {
-		ops = &relay.Ops{C: relay.NewRelayConsole(cfg.ConsoleConfig.ConsoleURL)}
+		// コンソールは RCON の接続先があるときだけ (無ければ、書き出しとロールバックはしない)
+		if cfg.ConsoleConfig.RconAddr != "" {
+			rc, err := console.NewRconConsole(cfg)
+			if err != nil {
+				return err
+			}
+			ops = &console.Ops{C: rc}
+		}
 		sh = capture.NewShooter(cfg)
 	}
 	// 通報の部品は、自動で投稿する動かし方 (AutoReport) と、コネクタ経由の操作で投稿を受ける動かし方 (AcceptOps) で要る。
@@ -140,7 +144,7 @@ func cmdRun(log *slog.Logger) error {
 
 func cmdCheck(log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
-	console := fs.Bool("console", false, "Minecraft のコンソールに `bluemap` (状態の表示だけ) を送って確かめる")
+	useConsole := fs.Bool("console", false, "Minecraft のコンソールに RCON で読み取りだけのコマンド (list) を送って確かめる")
 	_ = fs.Parse(args)
 	cfg, err := loadConfig(log)
 	if err != nil {
@@ -183,15 +187,15 @@ func cmdCheck(log *slog.Logger, args []string) error {
 		fmt.Printf("ai: ok (%s)\n", cfg.AIConfig.AIModel)
 	}
 
-	if *console {
-		ops := relay.Ops{C: relay.NewRelayConsole(cfg.ConsoleConfig.ConsoleURL)}
-		for _, mapID := range cfg.ShotConfig.MapIDs {
-			idle, err := ops.BlueMapIdle(ctx, mapID)
-			if err != nil {
-				return fmt.Errorf("console: %w", err)
-			}
-			fmt.Printf("console: ok (bluemap %s: 更新済みで待機中=%v)\n", mapID, idle)
+	if *useConsole {
+		rc, err := console.NewRconConsole(cfg)
+		if err != nil {
+			return err
 		}
+		if err := (console.Ops{C: rc}).Ping(ctx); err != nil {
+			return fmt.Errorf("console: %w", err)
+		}
+		fmt.Println("console: ok (RCON で応答があった)")
 	}
 	fmt.Printf("mode=%s  warps=%d\n", cfg.Mode, len(store.LoadWarps(cfg.StorageConfig.WarpsDir)))
 	return nil
@@ -203,7 +207,7 @@ func cmdReplay(log *slog.Logger, args []string) error {
 	from := fs.String("from", "", "開始 (RFC3339。例 2026-11-04T10:50:00+09:00)")
 	to := fs.String("to", "", "終了 (RFC3339)")
 	out := fs.String("out", "replay-out", "出力先のフォルダ")
-	noShot := fs.Bool("no-shot", false, "BlueMap の画面を撮らない (真上の図だけ)")
+	noShot := fs.Bool("no-shot", false, "Renderer の画面を撮らない (真上の図だけ)")
 	_ = fs.Parse(args)
 	if *user == "" || *from == "" || *to == "" {
 		return fmt.Errorf("-user, -from, -to are required")
@@ -278,14 +282,10 @@ func cmdReplay(log *slog.Logger, args []string) error {
 	return nil
 }
 
-// healthcheck: 監視の 1 回が成功していれば、DataDir/health の更新時刻が新しい。-relay は、コンソールの中継を確かめる。
+// healthcheck: 監視の 1 回が成功していれば、DataDir/health の更新時刻が新しい。
 func cmdHealth(log *slog.Logger, args []string) error {
 	fs := flag.NewFlagSet("healthcheck", flag.ExitOnError)
-	useRelay := fs.Bool("relay", false, "コンソールの中継 (console-relay) が答えるかを確かめる")
 	_ = fs.Parse(args)
-	if *useRelay {
-		return relay.RelayHealth()
-	}
 	cfg, err := loadConfig(log)
 	if err != nil {
 		return err

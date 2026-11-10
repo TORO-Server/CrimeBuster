@@ -16,9 +16,7 @@ go test ./...
 
 CI では、gofmt の検査、`go vet ./...`、`go test -race ./...`、govulncheck を実行する。
 
-### 実ブラウザ試験の条件
-
-実際のブラウザで撮影を確かめる試験 (`TestShotOnRealBrowser`) は、環境変数 `BROWSER_TEST_URL` (ブラウザの接続先) と `CHROME_TEST_PATH` (Chromium の場所) を設定したときだけ動く。設定しなければスキップされる。
+撮影の試験は、Renderer の API の試験用サーバー (httptest) で行う。実物の Renderer は要らない。
 
 ## 設定リファレンスの照合
 
@@ -28,7 +26,7 @@ CI では、gofmt の検査、`go vet ./...`、`go test -race ./...`、govulnche
 python3 scripts/check-docs.py
 ```
 
-Python の標準ライブラリだけを使う。環境変数を新しく読むようにしたときは、コード側の読み取りが `internal/config`、`internal/relay`、`internal/capture` のいずれかにあること (照合の対象はこの 3 ファイル) と、configuration.md への記載の両方が要る。
+Python の標準ライブラリだけを使う。環境変数を新しく読むようにしたときは、コード側の読み取りが照合の対象のファイル (`internal/config/config.go` と `internal/capture/shot.go`) にあることと、configuration.md への記載の両方が要る。
 
 ## 過去の記録で見積もりを取る
 
@@ -45,9 +43,8 @@ crime-buster replay -user NAME -from 2026-11-04T10:50:00+09:00 -to 2026-11-04T11
 
 ```bash
 crime-buster run                      # 監視を続ける
-crime-buster console-relay            # コンソールの中継を開く (Docker のソケットを持つ別のコンテナで)
-crime-buster healthcheck [-relay]     # 監視が回っているか / 中継が答えるか
-crime-buster check [-console]         # データベース・Discord のトークンとチャンネルを確かめる (何も投稿しない)
+crime-buster healthcheck              # 監視が回っているか
+crime-buster check [-console]         # データベース・Discord のトークンとチャンネルを確かめる (何も投稿しない)。-console は RCON の疎通も確かめる
 crime-buster scan -days 30            # 過去の記録で検知の見積もり
 crime-buster scan-chat -days 365      # 過去の記録でチャットの検知の見積もり
 crime-buster replay ...               # 過去の 1 件の再現 (上の例)

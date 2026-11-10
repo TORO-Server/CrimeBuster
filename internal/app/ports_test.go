@@ -13,7 +13,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 )
 
 // このファイルのフェイクは、ポート (ports.go) の差し替え可能性を確かめるためのもの。
@@ -97,20 +96,15 @@ func (f *fakeShooter) OverlayResult() string { return "ok: fake" }
 
 type fakeConsole struct{ ran []string }
 
-func (f *fakeConsole) Run(_ context.Context, cmd string, _ time.Duration, _ func(string) bool) ([]string, error) {
+func (f *fakeConsole) Run(_ context.Context, cmd string) (string, error) {
 	f.ran = append(f.ran, cmd)
-	return nil, nil
+	return "", nil
 }
 
 func (f *fakeConsole) Rollback(context.Context, string, int, string) error { return nil }
 func (f *fakeConsole) Kick(context.Context, string, string) error          { return nil }
 func (f *fakeConsole) SaveFlush(context.Context) error                     { return nil }
-
-func (f *fakeConsole) BlueMapUpdate(context.Context, string, int, int, int) error {
-	return nil
-}
-
-func (f *fakeConsole) WaitBlueMap(context.Context, string, time.Duration) error { return nil }
+func (f *fakeConsole) Ping(context.Context) error                          { return nil }
 
 // fakeGuard は、全てのポートにフェイクを差した Guard を作る。
 func fakeGuard(t *testing.T, mode config.Mode, p ports) (*Guard, string) {

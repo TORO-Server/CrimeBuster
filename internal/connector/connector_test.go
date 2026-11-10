@@ -9,7 +9,7 @@ import (
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
+	"crime-buster/internal/console"
 	"crime-buster/internal/store"
 	"crime-buster/internal/testutil"
 	"database/sql/driver"
@@ -125,7 +125,7 @@ func newConnEnvCP(t *testing.T, mode config.Mode, cp *detect.CP) *connEnv {
 	}}
 	mcpSrv := httptest.NewServer(fm)
 	t.Cleanup(mcpSrv.Close)
-	g := app.NewGuard(cfg, cp, st, &relay.Ops{C: con}, nil, notify.NewReporter(notify.NewMCP(mcpSrv.URL, "2025-11-25", true), "TOKEN", forumID, "55"), slog.New(slog.NewTextHandler(io.Discard, nil)))
+	g := app.NewGuard(cfg, cp, st, &console.Ops{C: con}, nil, notify.NewReporter(notify.NewMCP(mcpSrv.URL, "2025-11-25", true), "TOKEN", forumID, "55"), slog.New(slog.NewTextHandler(io.Discard, nil)))
 	fa := &fakeAuth{}
 	authSrv := httptest.NewServer(fa)
 	t.Cleanup(authSrv.Close)
@@ -396,6 +396,7 @@ func TestConnectorRollbackIsVerifiedInDatabase(t *testing.T) {
 		e.con.Reply = con.Reply
 		e.con.Err = con.Err
 		e.g.SetRollbackConfirmWait(time.Millisecond)
+		e.g.SetRollbackConfirmDeadline(300 * time.Millisecond)
 		e.putRecord(t, &domain.Record{ID: "r1", Kind: "block", Name: "griefer", World: "main", UserID: 7, Created: 1, Start: time.Now().Unix() - 60, End: 2, State: domain.StatePending})
 		if code, b := e.do(t, "POST", "/v1/incidents/r1/rollback", ""); code != 202 {
 			t.Fatalf("rollback: %d %s", code, b)

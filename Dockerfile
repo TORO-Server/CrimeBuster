@@ -27,7 +27,7 @@ FROM scratch
 COPY --from=compile /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 # unit を経由する
 COPY --from=unit /crime-buster /crime-buster
-# 非 root で動かす。ソケットを使うのは toro-console (console-relay) だけで、compose の group_add でそのグループに入れる
+# 非 root で動かす。crime-buster は Docker のソケットを使わない (コンソールへは RCON で送る)
 USER 65532:65532
 ENV DATA_DIR=/data
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 CMD ["/crime-buster", "healthcheck"]

@@ -6,14 +6,14 @@
 
 | パッケージ | 役割 |
 | --- | --- |
-| `cmd/crime-buster` | 入口。サブコマンド (`run`、`console-relay`、`healthcheck`、`check`、`scan`、`scan-chat`、`replay`) の振り分け |
+| `cmd/crime-buster` | 入口。サブコマンド (`run`、`healthcheck`、`check`、`scan`、`scan-chat`、`replay`) の振り分け |
 | `internal/config` | 環境変数からの設定の読み取りと検証、モードと能力の定義。他のパッケージに依存しない |
 | `internal/domain` | 事件の記録 (`Record`)、状態と遷移、判定の型、テキストの整形。他のパッケージに依存しない |
 | `internal/detect` | CoreProtect の記録からの検知 (ブロック変更、チャット) |
 | `internal/store` | 事件の記録と状態のファイル保存 |
-| `internal/capture` | BlueMap の画面の撮影と、真上から見た図の生成 |
+| `internal/capture` | Renderer の描画 API での撮影と、真上から見た図の生成 |
 | `internal/notify` | 報告文の生成、Discord への投稿 (MCP 経由)、AI 判定 |
-| `internal/relay` | コンソール中継 (`console-relay` サブコマンド)。Docker のソケットを持つのはこのプロセスだけ |
+| `internal/console` | Minecraft のコンソール (RCON)。送る前に許可リストで確かめる。Docker のソケットは持たない |
 | `internal/connector` | コネクタの HTTP API (認証、認可、監査、操作の受け付け) |
 | `internal/app` | 上記を組み立てる `Guard` と、事件処理・チャット処理・保持期間のサービス。依存は `internal/app/ports.go` のインターフェース越しに受ける |
 | `internal/testutil` | テスト用のフェイク (データベース、コンソール、MCP) |
@@ -25,7 +25,7 @@ CoreProtect の記録 ── 一定間隔で新しい行 ──▶ 検知 (人�
                                                 ▼
                                      事件を開く ── 動きが止まる (または上限の時間) と閉じる
                                                 ▼
-   真上から見た図 (必ず作れる) / BlueMap の画面 (被害) ──▶ ロールバック ──▶ BlueMap の画面 (復旧後)
+   真上から見た図 (必ず作れる) / Renderer の画面 (被害) ──▶ ロールバック ──▶ Renderer の画面 (復旧後)
                                                 ▼
                          Discord のフォーラムへ投稿、または確認待ちに置いてコネクタ経由の判断を待つ
 ```
@@ -38,7 +38,7 @@ CoreProtect の記録 ── 一定間隔で新しい行 ──▶ 検知 (人�
 | コネクタの HTTP API | コネクタが公開する経路と、認証・認可・監査の仕様の総称。仕様は [connector-api.md](connector-api.md) |
 | 事件 | 1 人のプレイヤーの一連の荒らしの疑いをまとめた記録。`DATA_DIR/reports/<id>/` に、記録 (`record.json`)、報告文、証拠の画像を置く |
 | 確認待ち (pending) | 事件の状態の 1 つ。通報も却下もまだされていない状態 |
-| 中継 (console-relay) | Minecraft のコンソールへ、許可した形のコマンドだけを送る別のプロセス。詳細は [console-relay.md](console-relay.md) |
+| コンソール | Minecraft のサーバーのコンソール。crime-buster は RCON でコマンドを送る。送れるのは、許可リスト (コード側の `internal/console` の `Allow`) にある形だけ: ワールドの書き出し (`save-all flush`)、読み取りだけの確認 (`list`)、CoreProtect のロールバック、キック、`CHAT_MUTE_CMD` の形のミュート |
 | 通報 | 事件を Discord のフォーラムへ投稿すること。詳細は [reporting.md](reporting.md) |
 
 造語や比喩で新しい概念を作らない。主要な用語はこの表でだけ定義し、他の文書はこの定義を使う。

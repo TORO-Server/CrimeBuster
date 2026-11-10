@@ -4,10 +4,10 @@ import (
 	"context"
 	"crime-buster/internal/capture"
 	"crime-buster/internal/config"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
 	"crime-buster/internal/notify"
-	"crime-buster/internal/relay"
 	"crime-buster/internal/store"
 	"fmt"
 	"os"
@@ -56,7 +56,7 @@ func (s *IncidentService) ProcessWindow(ctx context.Context, inc *store.Incident
 	res := &Result{Dir: dir, Stats: stats}
 	mapID := s.g.cfg.ShotConfig.MapIDs[stats.World]
 
-	// 1. 証拠の絵 (BlueMap が使えなくても作れる、真上からの図)
+	// 1. 証拠の絵 (Renderer が使えなくても作れる、真上からの図)
 	heat := filepath.Join(dir, "heatmap.png")
 	if err := capture.RenderHeatmap(stats, heat); err != nil {
 		s.g.log.Error("真上の図が作れない", "err", err)
@@ -68,24 +68,24 @@ func (s *IncidentService) ProcessWindow(ctx context.Context, inc *store.Incident
 		return res, writeJSON(filepath.Join(dir, "incident.json"), map[string]any{"incident": inc, "stats": detect.SummaryOf(stats)})
 	}
 
-	// 2. 被害の BlueMap の画面
+	// 2. 被害の Renderer の画面
 	cam := capture.CamFor(stats)
-	damage := s.bluemapShot(ctx, mapID, stats, cam, filepath.Join(dir, "damage.png"),
+	damage := s.rendererShot(ctx, mapID, stats, cam, filepath.Join(dir, "damage.png"),
 		capture.AnnotFor(stats, fmt.Sprintf("%s  BROKEN %s blocks", stats.User.Name, notify.Comma(stats.Breaks)),
 			"red = broken columns / yellow = affected area", true), true)
-	// 範囲が広いときは、いちばん壊された所に寄った画面も撮る (地図の更新は、全体の分で済んでいる)
+	// 範囲が広いときは、いちばん壊された所に寄った画面も撮る (書き出しは、全体の分で済んでいる)
 	closeup := ""
 	if cc, ok := capture.CloseCamFor(stats, cam); ok {
 		an := capture.AnnotFor(stats, fmt.Sprintf("%s  CLOSE-UP (most broken spot)", stats.User.Name), "red = broken columns", true)
 		an.NoBox = true
-		closeup = s.bluemapShot(ctx, mapID, stats, cc, filepath.Join(dir, "closeup.png"), an, false)
+		closeup = s.rendererShot(ctx, mapID, stats, cc, filepath.Join(dir, "closeup.png"), an, false)
 	}
 
 	// 3. AI の確認 → ロールバック (live だけ)
 	out := notify.Outcome{}
 	seconds := int(now-inc.Start) + 5
-	out.Cmd = relay.RollbackCmd(inc.Name, seconds, stats.World)
-	out.RestoreCmd = relay.RestoreCmd(inc.Name, seconds, stats.World)
+	out.Cmd = console.RollbackCmd(inc.Name, seconds, stats.World)
+	out.RestoreCmd = console.RestoreCmd(inc.Name, seconds, stats.World)
 	if s.ai != nil {
 		v, err := s.ai.ReviewIncident(ctx, stats, inc.Trigger, []string{damage, closeup})
 		if err != nil {
@@ -123,7 +123,7 @@ func (s *IncidentService) ProcessWindow(ctx context.Context, inc *store.Incident
 			out.Error = rollbackError(err, done, total).Error()
 		}
 		if out.RolledBack {
-			restored = s.bluemapShot(ctx, mapID, stats, cam, filepath.Join(dir, "restored.png"),
+			restored = s.rendererShot(ctx, mapID, stats, cam, filepath.Join(dir, "restored.png"),
 				capture.AnnotFor(stats, fmt.Sprintf("%s  RESTORED (rollback done)", stats.User.Name), "yellow = affected area", false), true)
 		}
 	default:
@@ -210,9 +210,11 @@ func (s *IncidentService) blockReport(stats *detect.Stats, trigger string, out n
 	return notify.BuildReport(notify.ReportInput{Stats: stats, Trigger: trigger, Warp: warp, Out: out, Images: desc, Mode: s.g.cfg.Mode, Center: &cam})
 }
 
-// bluemapShot は、書き出し → BlueMap の更新 → 待つ → 撮る。失敗しても事件の処理は続ける (空の文字列を返す)。
-// refresh が false のときは、書き出しと更新を飛ばして、いまの地図で撮る (同じ事件の 2 枚目以降)。
-func (s *IncidentService) bluemapShot(ctx context.Context, mapID string, stats *detect.Stats, cam capture.Cam, out string, ann *capture.Annot, refresh bool) string {
+// rendererShot は、(refresh のときは) 書き出し → Renderer に描かせる。失敗しても事件の処理は続ける (空の文字列を返す)。
+// Renderer は region ファイルを直接読むので、地図の更新を待つ必要はない。書き出しは、
+// メモリ上の変更を region ファイルへ反映するために残す。
+// refresh が false のときは、書き出しを飛ばす (同じ事件の 2 枚目以降)。
+func (s *IncidentService) rendererShot(ctx context.Context, mapID string, stats *detect.Stats, cam capture.Cam, out string, ann *capture.Annot, refresh bool) string {
 	if s.shooter == nil || mapID == "" {
 		return ""
 	}
@@ -221,18 +223,12 @@ func (s *IncidentService) bluemapShot(ctx context.Context, mapID string, stats *
 			s.g.log.Warn("書き出しの順番を待ちきれない", "err", err)
 			return ""
 		}
-		cx, cz, radius := blueMapArea(stats, cam)
 		if err := s.console.SaveFlush(ctx); err != nil {
 			s.g.log.Warn("ワールドの書き出しに失敗", "err", err)
 		}
-		if err := s.console.BlueMapUpdate(ctx, mapID, cx, cz, radius); err != nil {
-			s.g.log.Warn("BlueMap の更新を頼めない", "err", err)
-		} else if err := s.console.WaitBlueMap(ctx, mapID, 6*time.Minute); err != nil {
-			s.g.log.Warn("BlueMap の更新を待ちきれない (古い地図で撮る)", "err", err)
-		}
 	}
 	if err := s.shooter.Shot(ctx, mapID, cam, out, ann); err != nil {
-		s.g.log.Warn("BlueMap の画面が撮れない", "err", err)
+		s.g.log.Warn("Renderer の画面が撮れない", "err", err)
 		return ""
 	}
 	if ann != nil && !strings.HasPrefix(s.shooter.OverlayResult(), "ok:") {
