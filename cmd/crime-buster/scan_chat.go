@@ -3,24 +3,24 @@ package main
 import (
 	"context"
 	"crime-buster/internal/app"
-	"crime-buster/internal/config"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/notify"
 	"fmt"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 )
 
 // ---- scan-chat: 過去の発言に、いまの決まりを当てはめて、誤検知を見積もる (何も書かない・投稿しない) ----
-func cmdScanChat(args []string) error {
+func cmdScanChat(log *slog.Logger, args []string) error {
 	days := 30.0
 	for i, a := range args {
 		if a == "-days" && i+1 < len(args) {
 			fmt.Sscan(args[i+1], &days)
 		}
 	}
-	cfg, err := config.LoadConfig()
+	cfg, err := loadConfig(log)
 	if err != nil {
 		return err
 	}
