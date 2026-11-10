@@ -14,7 +14,6 @@ import (
 	"log/slog"
 	"math"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -23,16 +22,20 @@ import (
 // Guard は、CoreProtect の変更を監視し、荒らしを見つけたら、証拠の画像を作って通報し、ロールバックする。
 type Guard struct {
 	cfg      *config.Config
-	cp       *detect.CP
+	cp       Reader
 	det      *detect.Detector
 	cdet     *detect.ChatDetector
-	ai       *notify.AI // キーが無ければ nil
+	ai       Judge // キーが無ければ nil
 	store    *store.Store
-	ops      *relay.Ops       // コンソール (observe では使わない。replay では nil)
-	shooter  *capture.Shooter // 画像 (observe では使わない)
-	reporter *notify.Reporter // live だけ
+	console  Console  // コンソール (observe では使わない。replay では nil)
+	shooter  Shooter  // 画像 (observe では使わない)
+	reporter Reporter // 通報 (live だけ)
 	warps    []store.Warp
 	log      *slog.Logger
+
+	incidents *IncidentService
+	chat      *ChatService
+	retention *Retention
 
 	mu         sync.Mutex
 	suppressed map[int]int64 // user → この時刻まで、検知しても無視する (道具を使った人、信頼する人)
@@ -59,12 +62,74 @@ const (
 )
 
 func NewGuard(cfg *config.Config, cp *detect.CP, st *store.Store, ops *relay.Ops, sh *capture.Shooter, rep *notify.Reporter, log *slog.Logger) *Guard {
-	return &Guard{
-		cfg: cfg, cp: cp, det: detect.NewDetector(cfg), cdet: detect.NewChatDetector(cfg), ai: notify.NewAI(cfg), store: st, ops: ops, shooter: sh, reporter: rep,
-		warps: store.LoadWarps(cfg.StorageConfig.WarpsDir), log: log,
+	return newGuard(cfg, st, log, ports{
+		cp:       readerOrNil(cp),
+		ai:       judgeOrNil(notify.NewAI(cfg)),
+		console:  consoleOrNil(ops),
+		shooter:  shooterOrNil(sh),
+		reporter: reporterOrNil(rep),
+	})
+}
+
+// ports は、Guard とそのサービスが使う依存の集まり (ports.go で定義した境界)。
+type ports struct {
+	cp       Reader
+	ai       Judge
+	console  Console
+	shooter  Shooter
+	reporter Reporter
+}
+
+func newGuard(cfg *config.Config, st *store.Store, log *slog.Logger, p ports) *Guard {
+	g := &Guard{
+		cfg: cfg, cp: p.cp, det: detect.NewDetector(cfg), cdet: detect.NewChatDetector(cfg), ai: p.ai, store: st,
+		console: p.console, shooter: p.shooter, reporter: p.reporter,
+		warps:      store.LoadWarps(cfg.StorageConfig.WarpsDir),
+		log:        log,
 		suppressed: map[int]int64{}, queue: make(chan *store.Incident, 16), busy: map[string]string{},
 		refreshEvery: refreshInterval, rollbackConfirmWait: 5 * time.Second,
 	}
+	g.incidents = &IncidentService{g: g, cp: p.cp, ai: p.ai, console: p.console, shooter: p.shooter, reporter: p.reporter}
+	g.chat = &ChatService{g: g, cp: p.cp, ai: p.ai, console: p.console, reporter: p.reporter}
+	g.retention = &Retention{g: g}
+	return g
+}
+
+// 具象型が nil のときは、ポート自体も nil にする。型付き nil を入れると、
+// 「依存が無いので、その機能は使えない」という nil 判定が壊れるため。
+func readerOrNil(cp *detect.CP) Reader {
+	if cp == nil {
+		return nil
+	}
+	return cp
+}
+
+func judgeOrNil(ai *notify.AI) Judge {
+	if ai == nil {
+		return nil
+	}
+	return ai
+}
+
+func reporterOrNil(r *notify.Reporter) Reporter {
+	if r == nil {
+		return nil
+	}
+	return r
+}
+
+func shooterOrNil(s *capture.Shooter) Shooter {
+	if s == nil {
+		return nil
+	}
+	return s
+}
+
+func consoleOrNil(ops *relay.Ops) Console {
+	if ops == nil {
+		return nil
+	}
+	return opsConsole{ops: ops}
 }
 
 // incidentID は事件の ID (フォルダの名前になる)。名前が ID に使えないときは、ユーザーの番号を使う (一覧から消えないように)。
@@ -107,7 +172,7 @@ func (g *Guard) Run(ctx context.Context) error {
 	g.mu.Unlock()
 
 	go g.worker(ctx)
-	go g.sweepLoop(ctx)
+	go g.retention.Loop(ctx)
 
 	tick := time.NewTicker(g.cfg.DetectConfig.PollInterval)
 	defer tick.Stop()
@@ -151,7 +216,7 @@ func (g *Guard) step(ctx context.Context) error {
 		}
 	}
 	if g.cfg.ChatConfig.ChatEnabled {
-		if err := g.stepChat(ctx); err != nil {
+		if err := g.chat.stepChat(ctx); err != nil {
 			g.log.Error("チャットの監視が失敗", "err", err)
 		}
 	}
@@ -159,132 +224,6 @@ func (g *Guard) step(ctx context.Context) error {
 	defer g.mu.Unlock()
 	g.closeIdle(time.Now().Unix())
 	return g.store.Save()
-}
-
-// stepChat は新しい発言を読んで、スパムを事件にする。
-func (g *Guard) stepChat(ctx context.Context) error {
-	for {
-		msgs, err := g.cp.PollChat(ctx, g.store.S.ChatCur, 5000)
-		if err != nil {
-			return err
-		}
-		now := time.Now().Unix()
-		flags := g.aiChat(ctx, msgs, now) // 通信があるので、ロックの外で
-		g.mu.Lock()
-		for _, m := range msgs {
-			g.store.S.ChatCur = m.RowID
-			if now-m.Time > int64(g.cfg.DetectConfig.MaxEventAge.Seconds()) {
-				continue
-			}
-			g.onChat(ctx, m, flags[m.RowID])
-		}
-		g.mu.Unlock()
-		if len(msgs) < 5000 {
-			return nil
-		}
-	}
-}
-
-// maxAIChatBatch は、AI に 1 度に見せる発言の数の上限。
-const maxAIChatBatch = 40
-
-// aiChat は、新しい発言を AI に見せて、対応すべき発言 (rowid → 判定) を返す。AI を使わない・失敗したときは空。
-// 発言が多い (起動直後に溜まっていたときなど) ときは、新しいほうから maxAIChatBatch 件だけ見せる。
-func (g *Guard) aiChat(ctx context.Context, msgs []detect.ChatMsg, now int64) map[int64]*notify.ChatFlag {
-	if g.ai == nil || !g.cfg.AIConfig.AIChat {
-		return nil
-	}
-	var fresh []detect.ChatMsg
-	for _, m := range msgs {
-		if now-m.Time <= int64(g.cfg.DetectConfig.MaxEventAge.Seconds()) && strings.TrimSpace(m.Msg) != "" {
-			fresh = append(fresh, m)
-		}
-	}
-	if len(fresh) == 0 {
-		return nil
-	}
-	if len(fresh) > maxAIChatBatch {
-		fresh = fresh[len(fresh)-maxAIChatBatch:]
-	}
-	names := map[int]string{}
-	for _, m := range fresh {
-		if _, ok := names[m.User]; !ok {
-			if u, err := g.cp.User(ctx, m.User); err == nil {
-				names[m.User] = u.Name
-			}
-		}
-	}
-	// 1 人ずつ尋ねる (ほかの人の発言の文字が、その人の判定に影響しないように)
-	out := map[int64]*notify.ChatFlag{}
-	for _, part := range chatByUser(fresh) {
-		list, err := g.ai.ReviewChat(ctx, part, names)
-		if err != nil {
-			g.log.Warn("AI のチャットの判定が取れない (決まりだけで見張る)", "err", err)
-			continue
-		}
-		for i := range list {
-			f := list[i]
-			if f.Confidence < g.cfg.AIConfig.AIMinConf {
-				continue
-			}
-			out[part[f.ID].RowID] = &f
-		}
-	}
-	return out
-}
-
-// chatByUser は、発言を人ごとに分ける。人の順は最初の発言の順、発言の順はそのまま。
-func chatByUser(msgs []detect.ChatMsg) [][]detect.ChatMsg {
-	index := map[int]int{}
-	var out [][]detect.ChatMsg
-	for _, m := range msgs {
-		i, ok := index[m.User]
-		if !ok {
-			i = len(out)
-			index[m.User] = i
-			out = append(out, nil)
-		}
-		out[i] = append(out[i], m)
-	}
-	return out
-}
-
-// onChat は g.mu を持って呼ぶ。flag は、AI がこの発言を対応すべきと判定したとき (無ければ nil)。
-func (g *Guard) onChat(ctx context.Context, m detect.ChatMsg, flag *notify.ChatFlag) {
-	key := store.ChatKey(m.User)
-	open := g.store.S.Incidents[key]
-	if open != nil && m.Time > open.Last {
-		open.Last = m.Time
-	}
-	t := g.cdet.Feed(m)
-	// 決まりの検知が重なったら、AI の判定だけの事件ではなくなる
-	if t != nil && open != nil && open.AIOnly {
-		open.AIOnly, open.Trigger = false, t.String()
-	}
-	if t == nil && flag != nil {
-		t = &detect.ChatTrigger{User: m.User, Time: m.Time, Kind: "ai", Detail: fmt.Sprintf("%s (確からしさ %d%%) %s", flag.Category, flag.Confidence, flag.Summary)}
-	}
-	if t == nil || open != nil || m.Time < g.suppressed[-m.User] {
-		return
-	}
-	u, err := g.cp.User(ctx, m.User)
-	if err != nil {
-		g.log.Error("ユーザーが引けない", "user", m.User, "err", err)
-		return
-	}
-	lname := strings.ToLower(u.Name)
-	if g.cfg.DetectConfig.TrustedPlayers[lname] || LoadOps(g.cfg.DetectConfig.OpsFile)[lname] {
-		g.suppressed[-m.User] = m.Time + 3600 // チャットは、ブロックと別に数える (鍵を負の数にする)
-		g.log.Info("チャットのスパムを検知したが対象外", "player", u.Name, "trigger", t.String())
-		return
-	}
-	inc := &store.Incident{
-		ID:     incidentID("chat-", m.Time, u.Name, m.User),
-		UserID: m.User, Name: u.Name, UUID: u.UUID, Kind: "chat", AIOnly: t.Kind == "ai",
-		Start: m.Time, Last: m.Time, Trigger: t.String(),
-	}
-	g.store.S.Incidents[key] = inc
-	g.log.Warn("チャットのスパムを検知", "player", u.Name, "trigger", t.String(), "incident", inc.ID, "mode", g.cfg.Mode)
 }
 
 // onEvent は g.mu を持って呼ぶ。
@@ -349,13 +288,13 @@ func (g *Guard) consider(ctx context.Context, t detect.Trigger, e detect.Event) 
 	g.store.S.Incidents[fmt.Sprint(t.User)] = inc
 	g.log.Warn("荒らしを検知", "player", u.Name, "uuid", u.UUID, "trigger", trigger, "incident", inc.ID, "mode", g.cfg.Mode)
 
-	if config.CapabilitiesFor(g.cfg.Mode).AutoKick && g.cfg.ConsoleConfig.KickEnabled && g.ops != nil {
+	if config.CapabilitiesFor(g.cfg.Mode).AutoKick && g.cfg.ConsoleConfig.KickEnabled && g.console != nil {
 		go g.kickDetected(ctx, u.Name) // g.mu を持ったままコンソールを待たない
 	}
 }
 
 func (g *Guard) kickDetected(ctx context.Context, name string) {
-	if err := g.ops.Kick(ctx, name, "ブロックを不自然な速さで変えたため"); err != nil {
+	if err := g.console.Kick(ctx, name, "ブロックを不自然な速さで変えたため"); err != nil {
 		g.log.Error("キックに失敗", "err", err)
 		return
 	}
@@ -428,231 +367,6 @@ func (g *Guard) handle(ctx context.Context, inc *store.Incident) {
 	}
 }
 
-// Result は 1 件の事件の処理の結果。
-type Result struct {
-	Dir      string
-	Stats    *detect.Stats
-	Report   string
-	Out      notify.Outcome
-	ThreadID string
-	Images   []notify.ReportFile
-}
-
-// Process は 1 件の事件を、mode に合わせて処理する。
-//
-//	observe: まとめを記録するだけ
-//	dry-run: 画像と報告文を作ってフォルダに置くだけ (投稿もロールバックもしない)
-//	live:    画像 → ロールバック → 復旧後の画像 → 通報
-func (g *Guard) Process(ctx context.Context, inc *store.Incident) (*Result, error) {
-	return g.ProcessWindow(ctx, inc, time.Now().Unix())
-}
-
-// processWindow は [inc.Start, end] の分を処理する (replay は、過去の end を渡す)。
-func (g *Guard) ProcessWindow(ctx context.Context, inc *store.Incident, end int64) (*Result, error) {
-	if !domain.ValidID(inc.ID) {
-		return nil, fmt.Errorf("事件の ID %q はフォルダに使えません", inc.ID)
-	}
-	user := detect.UserInfo{ID: inc.UserID, Name: inc.Name, UUID: inc.UUID}
-	now := time.Now().Unix()
-	stats, err := g.cp.Stats(ctx, user, inc.Start-2, end)
-	if err != nil {
-		return nil, fmt.Errorf("stats: %w", err)
-	}
-	if stats.Empty() {
-		return nil, fmt.Errorf("no block changes found for %s", inc.Name)
-	}
-	dir := filepath.Join(g.cfg.StorageConfig.DataDir, "reports", inc.ID)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil, err
-	}
-	res := &Result{Dir: dir, Stats: stats}
-	mapID := g.cfg.ShotConfig.MapIDs[stats.World]
-
-	// 1. 証拠の絵 (BlueMap が使えなくても作れる、真上からの図)
-	heat := filepath.Join(dir, "heatmap.png")
-	if err := capture.RenderHeatmap(stats, heat); err != nil {
-		g.log.Error("真上の図が作れない", "err", err)
-		heat = ""
-	}
-
-	if config.CapabilitiesFor(g.cfg.Mode).RecordOnly {
-		g.log.Info("観察のみ", "incident", inc.ID, "breaks", stats.Breaks, "places", stats.Places, "peak_per_s", stats.PeakPerS)
-		return res, writeJSON(filepath.Join(dir, "incident.json"), map[string]any{"incident": inc, "stats": detect.SummaryOf(stats)})
-	}
-
-	// 2. 被害の BlueMap の画面
-	cam := capture.CamFor(stats)
-	damage := g.bluemapShot(ctx, mapID, stats, cam, filepath.Join(dir, "damage.png"),
-		capture.AnnotFor(stats, fmt.Sprintf("%s  BROKEN %s blocks", stats.User.Name, notify.Comma(stats.Breaks)),
-			"red = broken columns / yellow = affected area", true), true)
-	// 範囲が広いときは、いちばん壊された所に寄った画面も撮る (地図の更新は、全体の分で済んでいる)
-	closeup := ""
-	if cc, ok := capture.CloseCamFor(stats, cam); ok {
-		an := capture.AnnotFor(stats, fmt.Sprintf("%s  CLOSE-UP (most broken spot)", stats.User.Name), "red = broken columns", true)
-		an.NoBox = true
-		closeup = g.bluemapShot(ctx, mapID, stats, cc, filepath.Join(dir, "closeup.png"), an, false)
-	}
-
-	// 3. AI の確認 → ロールバック (live だけ)
-	out := notify.Outcome{}
-	seconds := int(now-inc.Start) + 5
-	out.Cmd = relay.RollbackCmd(inc.Name, seconds, stats.World)
-	out.RestoreCmd = relay.RestoreCmd(inc.Name, seconds, stats.World)
-	if g.ai != nil {
-		v, err := g.ai.ReviewIncident(ctx, stats, inc.Trigger, []string{damage, closeup})
-		if err != nil {
-			g.log.Warn("AI の判定が取れない", "err", err)
-			out.AIError = err.Error()
-		} else {
-			out.AI = v
-			g.log.Info("AI の判定", "incident", inc.ID, "verdict", v.Verdict, "confidence", v.Confidence, "summary", v.Summary)
-		}
-	}
-	// AI が「荒らしではない」「確信が低い」と答えたら、ロールバックしない (通報はして、運営が見る)。
-	// AI が使えないときは、AI_REQUIRED=true でなければ、閾値の決まりだけで進める
-	switch {
-	case g.ai != nil && out.AI != nil && !out.AI.Allows(g.cfg.AIConfig.AIMinConf):
-		out.Skipped = fmt.Sprintf("AI の判定が「%s」(確からしさ %d%%) で、基準 %d%% の「荒らし」に届かない", notify.VerdictJP(out.AI.Verdict), out.AI.Confidence, g.cfg.AIConfig.AIMinConf)
-	case g.cfg.AIConfig.AIRequired && out.AI == nil:
-		out.Skipped = "AI の判定が得られない (AI_REQUIRED=true)"
-	case now-inc.Start > domain.MaxRollbackAge:
-		out.Skipped = "事件から 24 時間より長くたっている"
-	}
-	restored := ""
-	switch {
-	case out.Skipped != "":
-		// ロールバックしない
-	case config.CapabilitiesFor(g.cfg.Mode).AutoRollback && g.ops != nil:
-		err := g.ops.Rollback(ctx, inc.Name, seconds, stats.World)
-		done, total, ok, derr := g.confirmRollback(ctx, err, inc.UserID, stats.World, inc.Start-2, end)
-		if derr == nil {
-			out.RolledDone, out.RolledTotal = done, total
-		}
-		// 判定の基準はデータベース。コンソールの返事が取れなくても、ほぼ全部が戻っていれば成功とする
-		if ok {
-			out.RolledBack = true
-		} else {
-			out.Error = rollbackError(err, done, total).Error()
-		}
-		if out.RolledBack {
-			restored = g.bluemapShot(ctx, mapID, stats, cam, filepath.Join(dir, "restored.png"),
-				capture.AnnotFor(stats, fmt.Sprintf("%s  RESTORED (rollback done)", stats.User.Name), "yellow = affected area", false), true)
-		}
-	default:
-		out.Planned = true
-	}
-	res.Out = out
-
-	// 4. 報告文と画像
-	var files []notify.ReportFile
-	for _, c := range []struct{ name, path string }{{"damage.png", damage}, {"closeup.png", closeup}, {"restored.png", restored}} {
-		if c.path != "" {
-			files = append(files, notify.ReportFile{Name: c.name, Path: c.path})
-		}
-	}
-	if len(files) < 2 && heat != "" {
-		files = append(files, notify.ReportFile{Name: "heatmap.png", Path: heat})
-	}
-	res.Images = files
-	res.Report = g.blockReport(stats, inc.Trigger, out, files, cam)
-	if err := os.WriteFile(filepath.Join(dir, "report.md"), []byte(res.Report), 0o644); err != nil {
-		return res, err
-	}
-	_ = writeJSON(filepath.Join(dir, "incident.json"), map[string]any{"incident": inc, "stats": detect.SummaryOf(stats), "outcome": out})
-	rec := &domain.Record{
-		ID: inc.ID, Kind: "block", Name: inc.Name, UUID: inc.UUID, UserID: inc.UserID,
-		Created: now, Start: inc.Start, End: end, World: stats.World, Trigger: inc.Trigger,
-		State: domain.StatePending, RolledBack: out.RolledBack,
-		Breaks: stats.Breaks, Places: stats.Places, RollbackCmd: out.Cmd, RestoreCmd: out.RestoreCmd, AI: out.AI,
-	}
-	for _, f := range files {
-		rec.Images = append(rec.Images, f.Name)
-	}
-	if out.RolledBack {
-		rec.Decide(now, "crime-buster", "rollback", fmt.Sprintf("%d/%d", out.RolledDone, out.RolledTotal))
-	}
-
-	// 5. 通報 (live だけ)
-	if config.CapabilitiesFor(g.cfg.Mode).AutoReport && g.reporter != nil {
-		key := store.ThreadKey(inc.Name)
-		existing := ""
-		g.mu.Lock()
-		if t, ok := g.store.S.Threads[key]; ok && now-t.At < 24*3600 {
-			existing = t.ThreadID
-		}
-		g.mu.Unlock()
-		id, err := g.reporter.Post(ctx, existing, domain.SafeChat(notify.ThreadTitle(stats), 90), res.Report, files, out.RolledBack)
-		if err != nil {
-			return res, fmt.Errorf("post: %w", err)
-		}
-		res.ThreadID = id
-		g.mu.Lock()
-		g.store.S.Threads[key] = store.ThreadRef{ThreadID: id, At: now}
-		_ = g.store.Save()
-		g.mu.Unlock()
-		// 作った直後で状態は pending。遷移できなければ、記録を書かずに中断する
-		if err := rec.Transition(domain.StateReported); err != nil {
-			return res, err
-		}
-		rec.Thread = id
-		rec.Decide(now, "crime-buster", "report", "")
-	}
-	if err := store.SaveRecord(dir, rec); err != nil {
-		g.log.Warn("事件の記録が書けない", "incident", inc.ID, "err", err)
-	}
-	return res, nil
-}
-
-// blockReport はブロックの荒らしの報告文。ロールバックや通報のあとにも、同じ形で作り直す。
-func (g *Guard) blockReport(stats *detect.Stats, trigger string, out notify.Outcome, files []notify.ReportFile, cam capture.Cam) string {
-	what := map[string]string{
-		"damage.png":   "被害の全体 (赤い線 = 壊された列)",
-		"closeup.png":  "いちばん壊された所",
-		"restored.png": "ロールバック後",
-		"heatmap.png":  "壊した場所 (真上から)",
-	}
-	var desc []string
-	for i, f := range files {
-		desc = append(desc, fmt.Sprintf("%d枚目 %s", i+1, what[f.Name]))
-	}
-	warp := ""
-	if w, d, ok := store.Nearest(g.warps, stats.World, float64(stats.X0+stats.X1)/2, float64(stats.Z0+stats.Z1)/2); ok {
-		warp = notify.WarpText(w, d)
-	}
-	return notify.BuildReport(notify.ReportInput{Stats: stats, Trigger: trigger, Warp: warp, Out: out, Images: desc, Mode: g.cfg.Mode, Center: &cam})
-}
-
-// bluemapShot は、書き出し → BlueMap の更新 → 待つ → 撮る。失敗しても事件の処理は続ける (空の文字列を返す)。
-// refresh が false のときは、書き出しと更新を飛ばして、いまの地図で撮る (同じ事件の 2 枚目以降)。
-func (g *Guard) bluemapShot(ctx context.Context, mapID string, s *detect.Stats, cam capture.Cam, out string, ann *capture.Annot, refresh bool) string {
-	if g.shooter == nil || mapID == "" {
-		return ""
-	}
-	if g.ops != nil && refresh {
-		if err := g.waitRefresh(ctx); err != nil {
-			g.log.Warn("書き出しの順番を待ちきれない", "err", err)
-			return ""
-		}
-		cx, cz, radius := blueMapArea(s, cam)
-		if err := g.ops.SaveFlush(ctx); err != nil {
-			g.log.Warn("ワールドの書き出しに失敗", "err", err)
-		}
-		if err := g.ops.BlueMapUpdate(ctx, mapID, cx, cz, radius); err != nil {
-			g.log.Warn("BlueMap の更新を頼めない", "err", err)
-		} else if err := g.ops.WaitBlueMap(ctx, mapID, 6*time.Minute); err != nil {
-			g.log.Warn("BlueMap の更新を待ちきれない (古い地図で撮る)", "err", err)
-		}
-	}
-	if err := g.shooter.Shot(ctx, mapID, cam, out, ann); err != nil {
-		g.log.Warn("BlueMap の画面が撮れない", "err", err)
-		return ""
-	}
-	if ann != nil && !strings.HasPrefix(g.shooter.LastOverlay, "ok:") {
-		g.log.Warn("画面に印を重ねられなかった (印の無い画面を使う)", "result", g.shooter.LastOverlay)
-	}
-	return out
-}
-
 // waitRefresh は、書き出しと地図の更新の間隔を空ける (g.opMu を持って呼ぶ)。
 func (g *Guard) waitRefresh(ctx context.Context) error {
 	if wait := time.Until(g.lastRefresh.Add(g.refreshEvery)); wait > 0 {
@@ -686,20 +400,36 @@ func (g *Guard) Config() *config.Config { return g.cfg }
 // Logger は、組み立てに使ったロガーを返す。
 func (g *Guard) Logger() *slog.Logger { return g.log }
 
-// CP は、読み取りに使うデータベース接続を返す。
-func (g *Guard) CP() *detect.CP { return g.cp }
+// CP は、読み取りに使うデータベース接続を返す。ポートにフェイクが入っているときは nil
+// (コネクタの、データベースへ直接つなぐ経路は、その構成では使えない)。
+func (g *Guard) CP() *detect.CP {
+	cp, _ := g.cp.(*detect.CP)
+	return cp
+}
 
 // Reporter は、通報の部品を返す (無いときは nil)。
-func (g *Guard) Reporter() *notify.Reporter { return g.reporter }
+func (g *Guard) Reporter() *notify.Reporter {
+	r, _ := g.reporter.(*notify.Reporter)
+	return r
+}
 
 // Shooter は、撮影の部品を返す (無いときは nil)。
-func (g *Guard) Shooter() *capture.Shooter { return g.shooter }
+func (g *Guard) Shooter() *capture.Shooter {
+	s, _ := g.shooter.(*capture.Shooter)
+	return s
+}
 
 // Ops は、コンソール操作の部品を返す (無いときは nil)。
-func (g *Guard) Ops() *relay.Ops { return g.ops }
+func (g *Guard) Ops() *relay.Ops {
+	c, _ := g.console.(opsConsole)
+	return c.ops
+}
 
 // AI は、判定の部品を返す (無いときは nil)。
-func (g *Guard) AI() *notify.AI { return g.ai }
+func (g *Guard) AI() *notify.AI {
+	ai, _ := g.ai.(*notify.AI)
+	return ai
+}
 
 // ActiveIncidents は、いま開いている事件の数を返す。
 func (g *Guard) ActiveIncidents() int {
@@ -721,4 +451,9 @@ func (g *Guard) UnlockOp() { g.opMu.Unlock() }
 func (g *Guard) SetRollbackConfirmWait(d time.Duration) { g.rollbackConfirmWait = d }
 
 // SetShooter は、撮影の部品を差し替える (試験用)。
-func (g *Guard) SetShooter(s *capture.Shooter) { g.shooter = s }
+func (g *Guard) SetShooter(s *capture.Shooter) {
+	g.shooter = shooterOrNil(s)
+	if g.incidents != nil {
+		g.incidents.shooter = g.shooter
+	}
+}
