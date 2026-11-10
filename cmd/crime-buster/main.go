@@ -23,7 +23,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -63,14 +62,11 @@ func main() {
 	}
 }
 
-// loadConfig は設定を読み、旧名 (互換) で読んだ環境変数があれば、起動のログに1回出す。
+// loadConfig は設定を読む。
 func loadConfig(log *slog.Logger) (*config.Config, error) {
 	cfg, err := config.LoadConfig()
 	if err != nil {
 		return nil, err
-	}
-	if names := cfg.LegacyEnvNames(); len(names) > 0 {
-		log.Warn("環境変数を旧名で読んだ (新しい名前への移行を推奨)", "names", strings.Join(names, ", "))
 	}
 	return cfg, nil
 }

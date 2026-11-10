@@ -35,9 +35,6 @@ def code_env_names() -> set:
     names = set()
     simple = re.compile(r'(?:envStr|envInt|envBool|envDur)\(\s*"([A-Z][A-Z0-9_]*)"')
     secret = re.compile(r'envSecret\(\s*"([A-Z][A-Z0-9_]*)"')
-    compat = re.compile(
-        r'(?:envStrCompat|envBoolCompat)\(\s*"([A-Z][A-Z0-9_]*)"\s*,\s*"([A-Z][A-Z0-9_]*)"'
-    )
     getenv = re.compile(r'os\.Getenv\(\s*"([A-Z][A-Z0-9_]*)"')
     first_secret = re.compile(r"firstSecret\(([^)]*)\)")
     literal = re.compile(r'"([A-Z][A-Z0-9_]*)"')
@@ -45,8 +42,6 @@ def code_env_names() -> set:
         text = (ROOT / rel).read_text(encoding="utf-8")
         names.update(simple.findall(text))
         names.update(getenv.findall(text))
-        for m in compat.findall(text):
-            names.update(m)
         for name in secret.findall(text):
             names.add(name)
             names.add(name + "_FILE")
