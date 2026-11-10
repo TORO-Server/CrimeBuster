@@ -138,8 +138,6 @@ type Config struct {
 	ConnectorConfig
 	StorageConfig
 	RetentionConfig
-
-	legacyEnvNames []string // LoadConfig が旧名 (互換) で読んだ環境変数の名前
 }
 
 func LoadConfig() (*Config, error) {
@@ -155,7 +153,6 @@ func LoadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	legacy := []string{}
 	c := &Config{
 		Mode: Mode(envStr("CRIMEBUSTER_MODE", "observe")),
 		DBConfig: DBConfig{
@@ -225,11 +222,11 @@ func LoadConfig() (*Config, error) {
 			ShotSettle:     envDur("SHOT_SETTLE", 60*time.Second),
 		},
 		ConnectorConfig: ConnectorConfig{
-			Addr:             envStrCompat("CONNECTOR_ADDR", "CONTROL_ADDR", ":8090", &legacy),
+			Addr:             envStr("CONNECTOR_ADDR", ":8090"),
 			AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", "http://toro-auth:8081"), "/"),
 			AdminRoles:       splitList(envStr("ADMIN_ROLE_IDS", "")),
-			RequireLiveRoles: envBoolCompat("CONNECTOR_REQUIRE_LIVE_ROLES", "CONTROL_REQUIRE_LIVE_ROLES", true, &legacy),
-			DiscordAllow:     envStrCompat("CONNECTOR_DISCORD_ALLOW", "CONTROL_DISCORD_ALLOW", DefaultDiscordAllow, &legacy),
+			RequireLiveRoles: envBool("CONNECTOR_REQUIRE_LIVE_ROLES", true),
+			DiscordAllow:     envStr("CONNECTOR_DISCORD_ALLOW", DefaultDiscordAllow),
 		},
 		StorageConfig: StorageConfig{
 			WarpsDir: envStr("WARPS_DIR", ""),
@@ -239,17 +236,10 @@ func LoadConfig() (*Config, error) {
 			ReportRetention: envDur("REPORT_RETENTION", 90*24*time.Hour),
 		},
 	}
-	c.legacyEnvNames = legacy
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return c, nil
-}
-
-// LegacyEnvNames は、LoadConfig が旧名 (互換) で読んだ環境変数の名前を返す。
-// 新しい名前への移行を促すため、起動時に知らせるためのもの。
-func (c *Config) LegacyEnvNames() []string {
-	return append([]string(nil), c.legacyEnvNames...)
 }
 
 // envSecret は秘密の値を読む。K_FILE があれば、そのファイルの中身 (Docker の secret など)。無ければ環境変数の K。
@@ -299,30 +289,6 @@ func envBool(k string, d bool) bool {
 		if b, err := strconv.ParseBool(v); err == nil {
 			return b
 		}
-	}
-	return d
-}
-
-// envStrCompat は、新しい名前を優先して読み、無ければ旧名 (互換) で読む。旧名で読んだ場合は used に旧名を記録する。
-func envStrCompat(newKey, legacyKey, d string, used *[]string) string {
-	if strings.TrimSpace(os.Getenv(newKey)) != "" {
-		return envStr(newKey, d)
-	}
-	if strings.TrimSpace(os.Getenv(legacyKey)) != "" {
-		*used = append(*used, legacyKey)
-		return envStr(legacyKey, d)
-	}
-	return d
-}
-
-// envBoolCompat は envStrCompat の bool 版。
-func envBoolCompat(newKey, legacyKey string, d bool, used *[]string) bool {
-	if strings.TrimSpace(os.Getenv(newKey)) != "" {
-		return envBool(newKey, d)
-	}
-	if strings.TrimSpace(os.Getenv(legacyKey)) != "" {
-		*used = append(*used, legacyKey)
-		return envBool(legacyKey, d)
 	}
 	return d
 }

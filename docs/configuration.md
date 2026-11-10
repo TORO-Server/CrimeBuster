@@ -4,8 +4,6 @@
 
 秘密の値は、環境変数の代わりにファイルで渡せるものがある (名前の末尾に `_FILE` を付けた変数にファイルのパスを渡す。Docker の secret など)。
 
-コネクタの設定の一部は、旧名でも読む (互換)。両方ある場合は新しい名前が優先し、旧名で読んだ場合は起動のログにその旨が出る。
-
 <!-- config-check:begin -->
 
 ## このプログラムの設定
@@ -20,11 +18,11 @@
 
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
-| `CONNECTOR_ADDR` | `:8090` | コネクタの待ち受けアドレス。空ならコネクタを開かない。旧名 `CONTROL_ADDR` でも読む (互換) |
+| `CONNECTOR_ADDR` | `:8090` | コネクタの待ち受けアドレス。空ならコネクタを開かない |
 | `AUTH_INTERNAL_URL` | `http://toro-auth:8081` | 認証サービスの introspection の接続先 (内部のネットワークだけ) |
 | `ADMIN_ROLE_IDS` | (無し。環境変数で指定) | コネクタを使える Discord のロールの ID (コンマ区切り)。指定が無ければ、どのロールでも通さない。操作を受けるモードでは必須 |
-| `CONNECTOR_REQUIRE_LIVE_ROLES` | `true` | 認可で、いまの Discord のロール (roles_source が live のもの) だけを信じるか。旧名 `CONTROL_REQUIRE_LIVE_ROLES` でも読む (互換) |
-| `CONNECTOR_DISCORD_ALLOW` | 読む・投稿・タグ付けだけを許可する正規表現 | コネクタから呼んでよい Discord のツール名の正規表現。旧名 `CONTROL_DISCORD_ALLOW` でも読む (互換) |
+| `CONNECTOR_REQUIRE_LIVE_ROLES` | `true` | 認可で、いまの Discord のロール (roles_source が live のもの) だけを信じるか。 |
+| `CONNECTOR_DISCORD_ALLOW` | 読む・投稿・タグ付けだけを許可する正規表現 | コネクタから呼んでよい Discord のツール名の正規表現 |
 
 ### データベース
 
@@ -159,7 +157,6 @@
 | 名前 | 意味 |
 | --- | --- |
 | `CRIMEBUSTER_CONNECTOR_URL` | コネクタの接続先。連携先の MCP サーバーにこれを渡すと、管理用のツールが有効になる |
-| `CRIMEBUSTER_CONTROL_URL` | 同じ設定の旧名。互換として受理される |
 
 ### テスト専用の設定
 
