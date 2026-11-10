@@ -189,6 +189,9 @@ func NewShooter(c *config.Config) *Shooter {
 	return &Shooter{URL: c.ShotConfig.BlueMapURL, Browser: c.ShotConfig.BrowserURL, Resolve: c.ShotConfig.BlueMapResolve, Chrome: c.ShotConfig.ChromePath, Flags: flags, W: c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight, MaxWait: c.ShotConfig.ShotSettle}
 }
 
+// OverlayResult は、直前の撮影で印を描いた結果を返す (Shot が LastOverlay に残したもの)。
+func (s *Shooter) OverlayResult() string { return s.LastOverlay }
+
 // tilesLoadedJS は、いま見えている範囲のタイルが全部読み終わったか。
 const tilesLoadedJS = `(() => {
   const b = window.bluemap;
