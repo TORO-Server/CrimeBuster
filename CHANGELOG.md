@@ -2,6 +2,10 @@
 
 版と変更の対応。タグは版と対応する。
 
+## v0.3.0
+
+- コネクタの環境変数の旧名 (`CONTROL_ADDR`、`CONTROL_REQUIRE_LIVE_ROLES`、`CONTROL_DISCORD_ALLOW`) の互換を廃止した。新しい名前 (`CONNECTOR_`) のみを読む
+
 ## v0.2.1
 
 - 状態の応答の `version` が常に `dev` になっていたのを直した (CI がイメージのビルドへ版を渡していなかった)
