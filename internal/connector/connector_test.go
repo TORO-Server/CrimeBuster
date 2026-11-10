@@ -661,12 +661,16 @@ func TestConnectorDiscordCallIsAudited(t *testing.T) {
 }
 
 func TestConnectorStatus(t *testing.T) {
+	// 状態の応答の version は、コネクタの Version の値をそのまま返す
+	prev := Version
+	Version = "1.2.3-test"
+	defer func() { Version = prev }()
 	e := newConnEnv(t, config.ModeReview)
 	e.putRecord(t, &domain.Record{ID: "p1", Kind: "block", Name: "p", Created: 1, State: domain.StatePending})
 	code, b := e.do(t, "GET", "/v1/status", "")
 	var st map[string]any
 	_ = json.Unmarshal(b, &st)
-	if code != 200 || st["mode"] != "review" || st["pending"] != float64(1) || st["can_act"] != true || st["can_mute"] != true {
+	if code != 200 || st["mode"] != "review" || st["version"] != "1.2.3-test" || st["pending"] != float64(1) || st["can_act"] != true || st["can_mute"] != true {
 		t.Fatalf("status: %d %s", code, b)
 	}
 }
