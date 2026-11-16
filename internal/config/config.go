@@ -310,7 +310,7 @@ func lowerSet(s string) map[string]bool {
 	return m
 }
 
-// parseMap は "main=overworld,flat=flat" をワールド名 → BlueMap の地図の名前にする。
+// parseMap は "main=overworld,flat=flat" をワールド名 → Renderer の地図の名前にする。
 func parseMap(s string) map[string]string {
 	m := map[string]string{}
 	for _, p := range strings.Split(s, ",") {
