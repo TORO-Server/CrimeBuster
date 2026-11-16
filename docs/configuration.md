@@ -90,7 +90,7 @@
 | `ROLLBACK_TAG_ID` | (無し。環境変数で指定) | ロールバックできたときに付けるタグの ID |
 | `DISCORD_MCP_URL` | `http://discord-mcp:8085/mcp` | Discord-MCP の接続先 |
 | `DISCORD_MCP_LAZY` | `true` | Discord-MCP がツールを 1 本にまとめているか |
-| `MCP_PROTOCOL_VERSION` | `2025-11-25` | MCP の版 |
+| `MCP_PROTOCOL_VERSION` | `2025-11-25` | MCP のバージョン |
 
 ### コンソール
 
