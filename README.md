@@ -1,6 +1,6 @@
 # CrimeBuster — 荒らしを見つけて、証拠の画像を付けて通報し、ロールバックする
 
-Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (TORO-Renderer が描く 3D の画面) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。イメージの中身は、実行ファイルと CA 証明書だけ (FROM scratch、非 root)。ブラウザも Docker のソケットも持たない (コンソールへは RCON で送る)。
+Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (TORO-Renderer が描く 3D の画面) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。コンテナの中身は、実行ファイルと通信用の証明書だけで、管理者権限では動かない。ブラウザも Docker のソケットも持たない (コンソールへは RCON で送る)。
 
 動かし方は 4 つ (モード) あり、検知して記録するだけの `observe` から、投稿とロールバックまで自動で行う `live` まで、段階を上げて使う。人か AI が確認してから決める運用では `review` を使い、事件は「確認待ち」になり、コネクタの HTTP API 経由で通報・ロールバック・却下を決める。
 
@@ -11,7 +11,7 @@ Minecraft サーバーの CoreProtect の記録を監視し、人の手では出
 3. `crime-buster check` で、データベースと Discord の接続を確かめる (何も投稿しない)。
 4. しばらく動かして検知の記録を見て、誤検知が無いことを確かめてから、`dry-run`、`review`、`live` の順に段階を上げる。
 
-導入の手順の詳細は [docs/operations.md](docs/operations.md)、設定は [docs/configuration.md](docs/configuration.md) にある。
+導入の手順は [docs/operations.md](docs/operations.md)、設定は [docs/configuration.md](docs/configuration.md) にある。
 
 ## 文書
 
@@ -24,8 +24,7 @@ Minecraft サーバーの CoreProtect の記録を監視し、人の手では出
 | [docs/reporting.md](docs/reporting.md) | 通報の仕様 (Discord への投稿、MCP 経由の投稿、AI 判定の位置付け) |
 | [docs/operations.md](docs/operations.md) | 導入手順、データの保持期間、ヘルスチェック、限界 |
 | [docs/development.md](docs/development.md) | ビルド、テスト、過去の記録で見積もりを取るコマンド |
-| [docs/verification/](docs/verification/) | 日付付きの検証記録 (履歴。規範ではない) |
-| [CHANGELOG.md](CHANGELOG.md) | 版と変更の対応 |
+| [CHANGELOG.md](CHANGELOG.md) | バージョンごとの変更 |
 
 ## 変更ガイド
 
