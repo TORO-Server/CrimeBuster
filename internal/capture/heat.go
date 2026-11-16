@@ -14,7 +14,7 @@ import (
 	"os"
 )
 
-// RenderHeatmap は壊した場所を真上から見た図にする。BlueMap が使えないときも、必ず作れる証拠の絵。
+// RenderHeatmap は壊した場所を真上から見た図にする。Renderer が使えないときも、必ず作れる証拠の絵。
 // 文字は basicfont (ASCII だけ) なので、数字と英語だけを書く。説明は報告の本文に書く。
 func RenderHeatmap(s *detect.Stats, out string) error {
 	const W, H = 1100, 760

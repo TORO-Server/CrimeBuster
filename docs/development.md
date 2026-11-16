@@ -6,7 +6,7 @@
 go build ./cmd/crime-buster
 ```
 
-イメージは Dockerfile で作る (実行ファイルと CA 証明書だけの FROM scratch、非 root)。
+イメージは Dockerfile で作る (実行ファイルと通信用の証明書だけを入れ、管理者権限では動かさない)。
 
 ## テスト
 
@@ -35,7 +35,7 @@ Python の標準ライブラリだけを使う。環境変数を新しく読む�
 ```bash
 crime-buster scan -days 30            # 過去のブロックの記録に、いまの閾値を当てはめて、誤検知を見積もる
 crime-buster scan-chat -days 365      # 同じことを、チャットで
-crime-buster replay -user NAME -from 2026-11-04T10:50:00+09:00 -to 2026-11-04T11:00:00+09:00 -out DIR
+crime-buster replay -user NAME -from <開始時刻 (RFC 3339)> -to <終了時刻 (RFC 3339)> -out DIR
                                     # 過去の 1 件に当てはめ、画像と報告文を DIR に作る
 ```
 
