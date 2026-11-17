@@ -22,7 +22,7 @@
 | `AUTH_INTERNAL_URL` | `http://toro-auth:8081` | 認証サービスの introspection の接続先 (内部のネットワークだけ) |
 | `ADMIN_ROLE_IDS` | (無し。環境変数で指定) | コネクタを使える Discord のロールの ID (コンマ区切り)。指定が無ければ、どのロールでも通さない。操作を受けるモードでは必須 |
 | `CONNECTOR_REQUIRE_LIVE_ROLES` | `true` | 認可で、いまの Discord のロール (roles_source が live のもの) だけを信じるか。 |
-| `CONNECTOR_DISCORD_ALLOW` | 読む・投稿・タグ付けだけを許可する正規表現 | コネクタから呼んでよい Discord のツール名の正規表現 |
+| `CONNECTOR_DISCORD_ALLOW` | `^discord_[a-z0-9_]+$` (全てのツール) | コネクタから呼んでよい Discord のツール名の正規表現 |
 
 ### データベース
 

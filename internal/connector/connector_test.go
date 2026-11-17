@@ -113,7 +113,7 @@ func newConnEnvCP(t *testing.T, mode config.Mode, cp *detect.CP) *connEnv {
 	con := &testutil.FakeConsole{}
 	fm := &testutil.FakeMCP{Reply: func(tool string, args map[string]any) (string, bool) {
 		if tool == "discord_search_tools" {
-			return `{"tools":[{"toolName":"discord_get_channel"},{"toolName":"discord_delete_channel"},{"toolName":"discord_create_message"}]}`, false
+			return `{"tools":[{"toolName":"discord_get_channel"},{"toolName":"discord_delete_channel"},{"toolName":"discord_create_message"},{"toolName":"discord_update_guild_role"},{"toolName":"evil_tool"}]}`, false
 		}
 		if tool == "discord_get_channel" {
 			if pp, _ := args["pathParams"].(map[string]any); pp["channel_id"] == threadID {
@@ -540,30 +540,78 @@ func TestConnectorActivityValidatesHours(t *testing.T) {
 	}
 }
 
-func TestConnectorDiscordAllowlist(t *testing.T) {
+// do のほかに、トークンを指定して呼ぶ (Admin 未満の確認用)。
+func (e *connEnv) doAs(t *testing.T, token, method, path, body string) int {
+	t.Helper()
+	req, _ := http.NewRequest(method, e.srv.URL+path, strings.NewReader(body))
+	req.Header.Set("Authorization", "Bearer "+token)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	_, _ = io.Copy(io.Discard, res.Body)
+	return res.StatusCode
+}
+
+// Admin 以上には、Discord-MCP が出すツールが全て出て、呼べる (ロールの更新・削除・BAN を含む)。
+func TestConnectorDiscordAllowsEveryTool(t *testing.T) {
 	e := newConnEnv(t, config.ModeReview)
 	code, b := e.do(t, "GET", "/v1/discord/tools?query=channel", "")
-	if code != 200 || bytes.Contains(b, []byte("delete_channel")) || !bytes.Contains(b, []byte("create_message")) {
-		t.Fatalf("tools: %d %s", code, b)
+	for _, name := range []string{"discord_get_channel", "discord_delete_channel", "discord_create_message", "discord_update_guild_role"} {
+		if code != 200 || !bytes.Contains(b, []byte(name)) {
+			t.Fatalf("tools に %s が無い: %d %s", name, code, b)
+		}
 	}
-	if code, _ := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_delete_channel","pathParams":{"channel_id":"1"}}`); code != 403 {
-		t.Errorf("delete: %d, want 403", code)
+	if bytes.Contains(b, []byte("evil_tool")) { // discord_ で始まらないものは出さない
+		t.Fatalf("許可外が出ている: %s", b)
 	}
-	if code, _ := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_ban_guild_member"}`); code != 403 {
-		t.Errorf("ban: %d, want 403", code)
+	n := len(e.mcp.Calls)
+	for _, tool := range []string{"discord_delete_channel", "discord_ban_guild_member", "discord_update_guild_role", "discord_delete_message"} {
+		if code, b := e.do(t, "POST", "/v1/discord/call", `{"tool":"`+tool+`","pathParams":{"guild_id":"`+forumID+`"}}`); code != 200 {
+			t.Errorf("%s: %d %s, want 200", tool, code, b)
+		}
 	}
-	if len(e.mcp.Calls) != 1 { // 許可しないものは、Discord-MCP まで届かない (最初の 1 回は tools の検索)
-		t.Fatalf("mcp calls: %v", e.mcp.Calls)
+	if len(e.mcp.Calls) != n+4 {
+		t.Errorf("mcp calls: %d, want %d", len(e.mcp.Calls), n+4)
 	}
-	code, b = e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+forumID+`"},"body":{"content":"hi","allowed_mentions":{"parse":["everyone"]}},"queryParams":{"limit":3},"reason":"test"}`)
+	for _, tool := range []string{"evil_tool", "discord_", "Discord_x", "discord_x/../y", "discord_get message"} {
+		if code, _ := e.do(t, "POST", "/v1/discord/call", `{"tool":"`+tool+`"}`); code != 403 {
+			t.Errorf("%q: %d, want 403", tool, code)
+		}
+	}
+	if len(e.mcp.Calls) != n+4 { // 許可しないものは、Discord-MCP まで届かない
+		t.Errorf("許可外が届いた: %d", len(e.mcp.Calls))
+	}
+}
+
+// Admin 未満は、Discord の経路に届かない (403)。Discord-MCP は呼ばれない。
+func TestConnectorDiscordIsAdminOnly(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
+	for _, tok := range []string{tokMod, tokModMCP, tokStale, tokOAuthRead, ""} {
+		if code := e.doAs(t, tok, "GET", "/v1/discord/tools", ""); code == 200 {
+			t.Errorf("tools (%q): %d", tok, code)
+		}
+		if code := e.doAs(t, tok, "POST", "/v1/discord/call", `{"tool":"discord_update_guild_role","pathParams":{"guild_id":"1","role_id":"2"},"body":{"name":"x"}}`); code == 200 {
+			t.Errorf("call (%q): %d", tok, code)
+		}
+	}
+	if len(e.mcp.Calls) != 0 {
+		t.Fatalf("Admin 未満の頼みが Discord-MCP に届いた: %v", e.mcp.Calls)
+	}
+}
+
+// 投稿の本文を、呼ぶ側が何を書いても、だれにも通知しない。許可の範囲は広げても、これは変えない。
+func TestConnectorDiscordMessagesNeverNotify(t *testing.T) {
+	e := newConnEnv(t, config.ModeReview)
+	code, b := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+forumID+`"},"body":{"content":"hi","allowed_mentions":{"parse":["everyone"]}},"queryParams":{"limit":3},"reason":"test"}`)
 	if code != 200 {
 		t.Fatalf("create_message: %d %s", code, b)
 	}
-	args := e.mcp.Calls[1]["args"].(map[string]any)
+	args := e.mcp.Calls[0]["args"].(map[string]any)
 	if args["toolName"] != "discord_create_message" || args["authOverride"] != "Bot TOKEN" || args["queryParams"] == nil {
 		t.Fatalf("args: %v", args)
 	}
-	// 呼ぶ側が何を書いても、だれにも通知しない
 	testutil.AssertNoMentions(t, args["body"].(map[string]any))
 	// 頼んだ人の名前を先に書く (理由は 200 文字で切れる)
 	if !strings.HasPrefix(args["auditLogReason"].(string), "admin1 (id 42): test") {
@@ -579,8 +627,8 @@ func TestConnectorDiscordAllowlist(t *testing.T) {
 	}
 }
 
-// Discord のツールは、通報フォーラムとそのスレッドの中だけ。
-func TestConnectorDiscordChannelScope(t *testing.T) {
+// Admin 以上には、チャンネルの限定も、操作の種類の限定も無い。
+func TestConnectorDiscordNoChannelOrOperationScope(t *testing.T) {
 	e := newConnEnv(t, config.ModeReview)
 	call := func(tool, pathParams, body string) int {
 		t.Helper()
@@ -589,78 +637,122 @@ func TestConnectorDiscordChannelScope(t *testing.T) {
 	}
 	in := func(id string) string { return `{"channel_id":"` + id + `"}` }
 	msg := `{"content":"hi"}`
-	tags := `{"applied_tags":["4444444444444444444"]}`
 	thread := `{"name":"x","message":{"content":"hi"}}`
+	role := `{"guild_id":"1000000000000000010","role_id":"1000000000000000011"}`
 	for _, c := range []struct {
 		name, tool, params, body string
 		want                     int
 	}{
 		{"フォーラムに書く", "discord_create_message", in(forumID), msg, 200},
 		{"スレッドに書く", "discord_create_message", in(threadID), msg, 200},
-		{"外に書く", "discord_create_message", in(outsideID), msg, 403},
-		{"外を読む", "discord_list_channel_messages", in(outsideID), `null`, 403},
-		{"スレッドを読む", "discord_list_channel_messages", in(threadID), `null`, 200},
-		{"チャンネルの指定が無い", "discord_list_channel_messages", `{}`, `null`, 400},
-		{"ID の形が違う", "discord_get_channel", in("5"), `null`, 400},
-		{"ID に余計な文字", "discord_get_channel", in(forumID + "/../1"), `null`, 400},
-		{"ID が文字列でない", "discord_get_channel", `{"channel_id":5}`, `null`, 400},
-		{"ほかのパスの値の形が違う", "discord_get_message", `{"channel_id":"` + forumID + `","message_id":"x"}`, `null`, 400},
+		{"外に書く (POST)", "discord_create_message", in(outsideID), msg, 200},
+		{"外を読む (GET)", "discord_list_channel_messages", in(outsideID), `null`, 200},
+		{"外のチャンネルを変える (PATCH)", "discord_update_channel", in(outsideID), `{"name":"x","permission_overwrites":[]}`, 200},
+		{"外のチャンネルを消す", "discord_delete_channel", in(outsideID), `null`, 200},
+		{"外に投稿を立てる", "discord_create_thread", in(outsideID), thread, 200},
+		{"スレッドの中に投稿を立てる", "discord_create_thread", in(threadID), thread, 200},
+		{"チャンネルを指定しない", "discord_get_my_user", `{}`, `null`, 200},
+		{"ロール: icon", "discord_update_guild_role", role, `{"icon":"data:image/png;base64,AAAA"}`, 200},
+		{"ロール: icon 以外 (名前・色・権限)", "discord_update_guild_role", role, `{"name":"n","color":1,"permissions":"8","hoist":true,"mentionable":true,"unicode_emoji":"x"}`, 200},
+		{"ロール: 本文なし", "discord_update_guild_role", role, `null`, 200},
+		{"絵文字 (名前:ID) のパス", "discord_get_my_user", `{"emoji":"name:1000000000000000012"}`, `null`, 200},
+		{"パスの値に区切り", "discord_get_channel", `{"channel_id":"` + forumID + `/../1"}`, `null`, 400},
+		{"パスの値に ..", "discord_get_channel", `{"channel_id":".."}`, `null`, 400},
+		{"パスの値に ?", "discord_get_channel", `{"channel_id":"1?x=1"}`, `null`, 400},
+		{"パスの値が空", "discord_get_channel", `{"channel_id":""}`, `null`, 400},
+		{"パスの値が文字列でない", "discord_get_channel", `{"channel_id":5}`, `null`, 400},
 		{"パスの値の名前の形が違う", "discord_get_channel", `{"channel_id":"` + forumID + `","authOverride":"` + forumID + `"}`, `null`, 400},
-		{"投稿を立てる", "discord_create_thread", in(forumID), thread, 200},
-		{"スレッドの中に投稿は立てない", "discord_create_thread", in(threadID), thread, 403},
 		{"投稿の本文が無い", "discord_create_thread", in(forumID), `{"name":"x"}`, 400},
 		{"メッセージの本文が無い", "discord_create_message", in(forumID), `null`, 400},
-		{"タグを変える", "discord_update_channel", in(threadID), tags, 200},
-		{"名前も変える", "discord_update_channel", in(threadID), `{"name":"x","applied_tags":[]}`, 403},
-		{"権限を変える", "discord_update_channel", in(threadID), `{"permission_overwrites":[]}`, 403},
-		{"タグの形が違う", "discord_update_channel", in(threadID), `{"applied_tags":["x"]}`, 400},
-		{"外のタグを変える", "discord_update_channel", in(outsideID), tags, 403},
-		{"チャンネルを指定しないツール", "discord_get_my_user", `{}`, `null`, 200},
 	} {
 		if code := call(c.tool, c.params, c.body); code != c.want {
 			t.Errorf("%s: %d, want %d", c.name, code, c.want)
 		}
 	}
+	// ロールの本文は、項目を削らずに Discord-MCP へ渡る
+	for _, call := range e.mcp.Calls {
+		args := call["args"].(map[string]any)
+		if args["toolName"] != "discord_update_guild_role" {
+			continue
+		}
+		body, _ := args["body"].(map[string]any)
+		if body != nil && body["permissions"] == "8" && (body["name"] != "n" || body["color"] != float64(1) || body["hoist"] != true || body["mentionable"] != true || body["unicode_emoji"] != "x") {
+			t.Errorf("ロールの項目が削られた: %v", body)
+		}
+		return
+	}
+	t.Error("ロール更新が Discord-MCP に届いていない")
 }
 
+// Admin 以上の操作 (破壊的なものを含む) も、audit.jsonl に、頼んだ人・理由・対象が残る。
 func TestConnectorDiscordCallIsAudited(t *testing.T) {
 	e := newConnEnv(t, config.ModeReview)
 	const secret = "投稿の本文そのもの"
-	code, b := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+forumID+`"},"body":{"content":"`+secret+`"}}`)
+	code, b := e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+forumID+`"},"body":{"content":"`+secret+`"},"reason":"お知らせ"}`)
 	if code != 200 {
 		t.Fatalf("%d %s", code, b)
 	}
-	code, _ = e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_create_message","pathParams":{"channel_id":"`+outsideID+`"},"body":{"content":"x"}}`)
+	// ロールの更新 (呼ぶ側が user などの名前を pathParams に混ぜても、記録の user は上書きされない)
+	code, b = e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_update_guild_role","pathParams":{"guild_id":"1000000000000000010","role_id":"1000000000000000011","user":"forged"},"body":{"name":"n"},"reason":"ロールの画像"}`)
+	if code != 200 {
+		t.Fatalf("role: %d %s", code, b)
+	}
+	// 破壊的な操作
+	code, _ = e.do(t, "POST", "/v1/discord/call", `{"tool":"discord_delete_channel","pathParams":{"channel_id":"`+outsideID+`"},"reason":"掃除"}`)
+	if code != 200 {
+		t.Fatalf("delete: %d", code)
+	}
+	// 断った呼び出し (許可外のツール) も残る
+	code, _ = e.do(t, "POST", "/v1/discord/call", `{"tool":"evil_tool","reason":"断られる"}`)
 	if code != 403 {
-		t.Fatalf("外: %d", code)
+		t.Fatalf("許可外: %d", code)
 	}
 	raw, err := os.ReadFile(filepath.Join(e.dir, "audit.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if len(lines) != 2 {
+	if len(lines) != 4 {
 		t.Fatalf("audit: %s", raw)
 	}
-	var first, second map[string]any
-	if err := json.Unmarshal([]byte(lines[0]), &first); err != nil {
-		t.Fatal(err)
+	var rows [4]map[string]any
+	for i := range rows {
+		if err := json.Unmarshal([]byte(lines[i]), &rows[i]); err != nil {
+			t.Fatal(err)
+		}
+		if rows[i]["user"] != "admin1 (id 42)" { // 誰の頼みか
+			t.Fatalf("user: %v", rows[i])
+		}
 	}
-	if err := json.Unmarshal([]byte(lines[1]), &second); err != nil {
-		t.Fatal(err)
+	if rows[0]["tool"] != "discord_create_message" || rows[0]["channel"] != forumID || len(rows[0]["body_sha256"].(string)) != 64 || rows[0]["reason"] != "お知らせ" || rows[0]["status"] != float64(200) {
+		t.Fatalf("audit[0]: %v", rows[0])
 	}
-	if first["tool"] != "discord_create_message" || first["channel"] != forumID || len(first["body_sha256"].(string)) != 64 || first["status"] != float64(200) {
-		t.Fatalf("audit: %v", first)
+	if rows[1]["tool"] != "discord_update_guild_role" || rows[1]["reason"] != "ロールの画像" || rows[1]["status"] != float64(200) {
+		t.Fatalf("audit[1]: %v", rows[1])
+	}
+	if pp, _ := rows[1]["path_params"].(map[string]any); pp["role_id"] != "1000000000000000011" || pp["guild_id"] != "1000000000000000010" {
+		t.Fatalf("audit[1] の対象: %v", rows[1])
+	}
+	if rows[2]["tool"] != "discord_delete_channel" || rows[2]["channel"] != outsideID || rows[2]["reason"] != "掃除" || rows[2]["status"] != float64(200) {
+		t.Fatalf("audit[2]: %v", rows[2])
+	}
+	if rows[3]["tool"] != "evil_tool" || rows[3]["reason"] != "断られる" || rows[3]["status"] != float64(403) {
+		t.Fatalf("audit[3]: %v", rows[3])
 	}
 	if strings.Contains(string(raw), secret) {
 		t.Fatalf("本文そのものを残している: %s", raw)
 	}
-	// 断った呼び出しも、どのチャンネルかが残る
-	if second["channel"] != outsideID || second["status"] != float64(403) {
-		t.Fatalf("audit: %v", second)
+	// 理由は Discord の監査ログにも、頼んだ人の名前つきで渡る
+	var sawRole bool
+	for _, c := range e.mcp.Calls {
+		if a := c["args"].(map[string]any); a["toolName"] == "discord_update_guild_role" {
+			sawRole = strings.HasPrefix(a["auditLogReason"].(string), "admin1 (id 42): ロールの画像")
+		}
+	}
+	if !sawRole {
+		t.Error("Discord の監査ログの理由に、頼んだ人が無い")
 	}
 }
-
 func TestConnectorStatus(t *testing.T) {
 	// 状態の応答の version は、コネクタの Version の値をそのまま返す
 	prev := Version
