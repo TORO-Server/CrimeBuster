@@ -7,6 +7,7 @@ import (
 )
 
 func TestConfigMode(t *testing.T) {
+	setRequiredEnv(t)
 	t.Setenv("CRIMEBUSTER_MODE", "nope")
 	if _, err := LoadConfig(); err == nil {
 		t.Fatal("bad mode must fail")
@@ -19,6 +20,7 @@ func TestConfigMode(t *testing.T) {
 }
 
 func TestConfigSecretsFromFiles(t *testing.T) {
+	setRequiredEnv(t)
 	dir := t.TempDir()
 	write := func(name, value string) string {
 		p := filepath.Join(dir, name)

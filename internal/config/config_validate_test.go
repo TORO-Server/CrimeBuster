@@ -23,6 +23,14 @@ func clearConfigEnv(t *testing.T) {
 	for _, n := range configEnvNames {
 		t.Setenv(n, "")
 	}
+	setRequiredEnv(t)
+}
+
+// setRequiredEnv は、既定値を持たない必須の環境変数に、試験用の値を入れる。
+func setRequiredEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("DB_HOST", "db.example.test")
+	t.Setenv("AUTH_INTERNAL_URL", "http://auth.example.test:8081")
 }
 
 // validConfig は、検証を通る設定をモードごとに返す (値は loadConfig の既定値に合わせる)。
@@ -30,7 +38,7 @@ func validConfig(mode Mode) *Config {
 	c := &Config{
 		Mode: mode,
 		DBConfig: DBConfig{
-			DBHost: "tidb", DBPort: "4000", DBUser: "root", DBName: "coreprotect", TablePrefix: "coreprotect_",
+			DBHost: "db.example.test", DBPort: "4000", DBUser: "root", DBName: "coreprotect", TablePrefix: "coreprotect_",
 		},
 		DetectConfig: DetectConfig{
 			BurstWindow: 5 * time.Second, BreakBurst: 100, PlaceBurst: 150,
@@ -50,12 +58,12 @@ func validConfig(mode Mode) *Config {
 			DiscordSRVConfig: "/discordsrv/config.yml",
 			DiscordMCPURL:    "http://discord-mcp:8085/mcp", DiscordMCPLazy: true, MCPProtocol: "2025-11-25",
 		},
-		ConsoleConfig: ConsoleConfig{RconAddr: "toro-main:25575", RconPassword: "test-password"},
+		ConsoleConfig: ConsoleConfig{RconAddr: "mc.example.test:25575", RconPassword: "test-password"},
 		ShotConfig: ShotConfig{
 			RendererURL: "http://toro-renderer:8080", ShotWidth: 1280, ShotHeight: 720,
 		},
 		ConnectorConfig: ConnectorConfig{
-			Addr: ":8090", AuthInternalURL: "http://toro-auth:8081",
+			Addr: ":8090", AuthInternalURL: "http://auth.example.test:8081",
 			RequireLiveRoles: true, DiscordAllow: DefaultDiscordAllow,
 		},
 		StorageConfig:   StorageConfig{DataDir: "/data"},
@@ -83,6 +91,8 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		want   string
 	}{
 		{"mode", func(c *Config) { c.Mode = "nope" }, "CRIMEBUSTER_MODE"},
+		{"db host", func(c *Config) { c.DBConfig.DBHost = "" }, "DB_HOST"},
+		{"auth url empty", func(c *Config) { c.ConnectorConfig.AuthInternalURL = "" }, "AUTH_INTERNAL_URL"},
 		{"db port text", func(c *Config) { c.DBConfig.DBPort = "abc" }, "DB_PORT"},
 		{"db port zero", func(c *Config) { c.DBConfig.DBPort = "0" }, "DB_PORT"},
 		{"db port too large", func(c *Config) { c.DBConfig.DBPort = "70000" }, "DB_PORT"},
@@ -104,9 +114,9 @@ func TestValidateRejectsBadValues(t *testing.T) {
 		{"ai min confidence low", func(c *Config) { c.AIConfig.AIMinConf = -1 }, "AI_MIN_CONFIDENCE"},
 		{"ai base url", func(c *Config) { c.AIConfig.AIBaseURL = "example.com" }, "AI_BASE_URL"},
 		{"renderer url", func(c *Config) { c.ShotConfig.RendererURL = "ftp://example.com" }, "RENDERER_URL"},
-		{"rcon addr", func(c *Config) { c.ConsoleConfig.RconAddr = "toro-main" }, "RCON_ADDR"},
-		{"rcon addr port", func(c *Config) { c.ConsoleConfig.RconAddr = "toro-main:0" }, "RCON_ADDR"},
-		{"auth url", func(c *Config) { c.ConnectorConfig.AuthInternalURL = "toro-auth:8081" }, "AUTH_INTERNAL_URL"},
+		{"rcon addr", func(c *Config) { c.ConsoleConfig.RconAddr = "mc.example.test" }, "RCON_ADDR"},
+		{"rcon addr port", func(c *Config) { c.ConsoleConfig.RconAddr = "mc.example.test:0" }, "RCON_ADDR"},
+		{"auth url", func(c *Config) { c.ConnectorConfig.AuthInternalURL = "auth.example.test:8081" }, "AUTH_INTERNAL_URL"},
 		{"discord mcp url", func(c *Config) { c.DiscordConfig.DiscordMCPURL = "ws://example.com" }, "DISCORD_MCP_URL"},
 		{"connector addr no port", func(c *Config) { c.ConnectorConfig.Addr = "8090" }, "CONNECTOR_ADDR"},
 		{"connector addr port zero", func(c *Config) { c.ConnectorConfig.Addr = ":0" }, "CONNECTOR_ADDR"},
@@ -223,7 +233,7 @@ func TestLoadConfigDefaults(t *testing.T) {
 	if c.Mode != ModeObserve {
 		t.Errorf("Mode = %q", c.Mode)
 	}
-	if c.DBConfig.DBHost != "tidb" || c.DBConfig.DBPort != "4000" || c.DBConfig.DBUser != "root" ||
+	if c.DBConfig.DBHost != "db.example.test" || c.DBConfig.DBPort != "4000" || c.DBConfig.DBUser != "root" ||
 		c.DBConfig.DBName != "coreprotect" || c.DBConfig.TablePrefix != "coreprotect_" {
 		t.Errorf("DB defaults: %+v", c.DBConfig)
 	}
@@ -258,6 +268,17 @@ func TestLoadConfigDefaults(t *testing.T) {
 	}
 }
 
+// 接続先は既定値を持たない。未設定のまま、意図しない接続先に黙ってつながらない。
+func TestLoadConfigRequiresHosts(t *testing.T) {
+	clearConfigEnv(t)
+	t.Setenv("DB_HOST", "")
+	t.Setenv("AUTH_INTERNAL_URL", "")
+	_, err := LoadConfig()
+	if err == nil || !strings.Contains(err.Error(), "DB_HOST") || !strings.Contains(err.Error(), "AUTH_INTERNAL_URL") {
+		t.Fatalf("missing DB_HOST and AUTH_INTERNAL_URL must be reported together: %v", err)
+	}
+}
+
 func TestLoadConfigCapabilityRequirements(t *testing.T) {
 	clearConfigEnv(t)
 	t.Setenv("CRIMEBUSTER_MODE", "review")
@@ -267,7 +288,7 @@ func TestLoadConfigCapabilityRequirements(t *testing.T) {
 	}
 	t.Setenv("ADMIN_ROLE_IDS", "111111111111111111")
 	t.Setenv("REPORT_CHANNEL_ID", "222222222222222222")
-	t.Setenv("RCON_ADDR", "toro-main:25575")
+	t.Setenv("RCON_ADDR", "mc.example.test:25575")
 	t.Setenv("RCON_PASSWORD", "test-password")
 	c, err := LoadConfig()
 	if err != nil || c.Mode != ModeReview {

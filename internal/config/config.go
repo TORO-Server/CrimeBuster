@@ -157,7 +157,7 @@ func LoadConfig() (*Config, error) {
 	c := &Config{
 		Mode: Mode(envStr("CRIMEBUSTER_MODE", "observe")),
 		DBConfig: DBConfig{
-			DBHost:      envStr("DB_HOST", "tidb"),
+			DBHost:      envStr("DB_HOST", ""),
 			DBPort:      envStr("DB_PORT", "4000"),
 			DBUser:      envStr("DB_USER", "root"),
 			DBPassword:  dbPassword,
@@ -221,7 +221,7 @@ func LoadConfig() (*Config, error) {
 		},
 		ConnectorConfig: ConnectorConfig{
 			Addr:             envStr("CONNECTOR_ADDR", ":8090"),
-			AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", "http://toro-auth:8081"), "/"),
+			AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", ""), "/"),
 			AdminRoles:       splitList(envStr("ADMIN_ROLE_IDS", "")),
 			RequireLiveRoles: envBool("CONNECTOR_REQUIRE_LIVE_ROLES", true),
 			DiscordAllow:     envStr("CONNECTOR_DISCORD_ALLOW", DefaultDiscordAllow),
