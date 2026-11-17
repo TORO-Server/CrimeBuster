@@ -25,7 +25,7 @@ TORO-Renderer の描画 API (`RENDERER_URL`) に、荒らされた場所の中�
 
 ## Discord の認証
 
-ボットのトークンは、DiscordSRV の設定 (`DISCORDSRV_CONFIG`) の BotToken を、読み取り専用でマウントして読む。トークンを環境変数のファイルやリポジトリに写さない。専用のボットを作るときは、`DISCORD_BOT_TOKEN` (または `DISCORD_BOT_TOKEN_FILE`) で渡す。これがあれば DiscordSRV の設定は読まない。
+ボットのトークンは、DiscordSRV の設定 (`DISCORDSRV_CONFIG`) の BotToken を、読み取り専用でマウントして読む。トークンを環境変数のファイルや置き場に写さない。専用のボットを作るときは、`DISCORD_BOT_TOKEN` (または `DISCORD_BOT_TOKEN_FILE`) で渡す。これがあれば DiscordSRV の設定は読まない。
 
 REST だけを使い、Gateway には接続しない。
 
