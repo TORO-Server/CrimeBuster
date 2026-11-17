@@ -21,10 +21,10 @@ import (
 // Go で描く。描く内容と色と太さは、以前のものと同じ。
 
 var (
-	pillarColor = color.RGBA{255, 30, 30, 140}  // rgba(255,30,30,0.55)
-	dotColor    = color.RGBA{255, 60, 60, 191}  // rgba(255,60,60,0.75)
-	boxUnder    = color.RGBA{0, 0, 0, 179}      // rgba(0,0,0,0.7)
-	labelPanel  = color.RGBA{10, 10, 14, 209}   // rgba(10,10,14,0.82)
+	pillarColor = color.RGBA{255, 30, 30, 140} // rgba(255,30,30,0.55)
+	dotColor    = color.RGBA{255, 60, 60, 191} // rgba(255,60,60,0.75)
+	boxUnder    = color.RGBA{0, 0, 0, 179}     // rgba(0,0,0,0.7)
+	labelPanel  = color.RGBA{10, 10, 14, 209}  // rgba(10,10,14,0.82)
 	labelLine1  = color.RGBA{0xff, 0x5a, 0x5a, 0xff}
 	labelLine2  = color.RGBA{0xe8, 0xe8, 0xee, 0xff}
 )
@@ -163,8 +163,8 @@ func fillPath(img *image.RGBA, col color.Color, build func(z *vector.Rasterizer)
 // dashedPath は、閉じた道を破線 [16, 10] で描く (破線は道全体で続く)。
 func dashedPath(img *image.RGBA, pts [][2]float64, width float64, col color.Color) {
 	const on, off = 16.0, 10.0
-	remain := on     // いまの区間の残り
-	drawing := true  // 描く区間かどうか
+	remain := on    // いまの区間の残り
+	drawing := true // 描く区間かどうか
 	n := len(pts)
 	for i := 0; i < n; i++ {
 		a := pts[i]

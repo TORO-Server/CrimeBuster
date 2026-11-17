@@ -4,9 +4,9 @@ import (
 	"context"
 	"crime-buster/internal/capture"
 	"crime-buster/internal/config"
+	"crime-buster/internal/console"
 	"crime-buster/internal/detect"
 	"crime-buster/internal/domain"
-	"crime-buster/internal/console"
 	"crime-buster/internal/notify"
 	"crime-buster/internal/store"
 	"encoding/json"
@@ -44,8 +44,8 @@ type Guard struct {
 	opMu  sync.Mutex // 時間のかかる処理 (事件の処理、ロールバック、撮影) を 1 つずつにする。キックとミュートは、これを待たない
 	recMu sync.Mutex // 事件の記録 (record.json) の読み書き
 
-	lastRefresh         time.Time     // 最後に書き出しを頼んだ時刻 (g.opMu を持って触る)
-	refreshEvery        time.Duration // 書き出しの間隔
+	lastRefresh             time.Time     // 最後に書き出しを頼んだ時刻 (g.opMu を持って触る)
+	refreshEvery            time.Duration // 書き出しの間隔
 	rollbackConfirmWait     time.Duration // データベースでロールバックを確かめ直す間隔
 	rollbackConfirmDeadline time.Duration // データベースで確かめ続ける上限
 }
