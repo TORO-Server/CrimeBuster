@@ -24,10 +24,10 @@ func TestMuteCommand(t *testing.T) {
 }
 
 func TestRollbackCmd(t *testing.T) {
-	if got := RollbackCmd("fuuty119", 415, "main"); got != "co rollback u:fuuty119 t:415s r:#main" {
+	if got := RollbackCmd("testuser", 415, "main"); got != "co rollback u:testuser t:415s r:#main" {
 		t.Fatal(got)
 	}
-	if got := RestoreCmd("fuuty119", 415, "main"); got != "co restore u:fuuty119 t:415s r:#main" {
+	if got := RestoreCmd("testuser", 415, "main"); got != "co restore u:testuser t:415s r:#main" {
 		t.Fatal(got)
 	}
 	// データベースから来た値でも、安全な形でなければコマンドを作らない

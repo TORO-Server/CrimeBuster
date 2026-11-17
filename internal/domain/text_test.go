@@ -18,7 +18,7 @@ func TestSafeChat(t *testing.T) {
 }
 
 func TestValidID(t *testing.T) {
-	for id, want := range map[string]bool{"20261104-101500-fuuty119": true, "chat-1-a.b": true, "": false, "../x": false, "a/b": false, "a\\b": false, "a..b": false, "x y": false} {
+	for id, want := range map[string]bool{"20261104-101500-testuser": true, "chat-1-a.b": true, "": false, "../x": false, "a/b": false, "a\\b": false, "a..b": false, "x y": false} {
 		if ValidID(id) != want {
 			t.Errorf("validID(%q) = %v", id, !want)
 		}
