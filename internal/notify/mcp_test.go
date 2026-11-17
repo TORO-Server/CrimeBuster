@@ -29,7 +29,7 @@ func TestReporterPostsThroughMCP(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := NewReporter(NewMCP(srv.URL, "2025-11-25", true), "TOKEN", "100", "55")
-	id, err := r.Post(context.Background(), "", "fuuty119", "本文", []ReportFile{{Name: "a.png", Path: img}}, true)
+	id, err := r.Post(context.Background(), "", "testuser", "本文", []ReportFile{{Name: "a.png", Path: img}}, true)
 	if err != nil || id != "777" {
 		t.Fatalf("id=%q err=%v", id, err)
 	}
@@ -47,7 +47,7 @@ func TestReporterPostsThroughMCP(t *testing.T) {
 		t.Fatalf("pathParams: %v", args["pathParams"])
 	}
 	body := args["body"].(map[string]any)
-	if body["name"] != "fuuty119" || body["applied_tags"].([]any)[0] != "55" || body["message"].(map[string]any)["content"] != "本文" {
+	if body["name"] != "testuser" || body["applied_tags"].([]any)[0] != "55" || body["message"].(map[string]any)["content"] != "本文" {
 		t.Fatalf("body: %v", body)
 	}
 	testutil.AssertNoMentions(t, body["message"].(map[string]any))

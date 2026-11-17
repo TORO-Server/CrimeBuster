@@ -16,7 +16,7 @@ func TestConsoleAllow(t *testing.T) {
 	for _, cmd := range []string{
 		"save-all flush",
 		"list",
-		"co rollback u:fuuty119 t:415s r:#main",
+		"co rollback u:testuser t:415s r:#main",
 		"co rollback u:a.b_c t:86405s r:#main_nether",
 		"kick spammer 荒らし op everyone",
 		"kick spammer " + long,
@@ -97,10 +97,10 @@ func TestAllowAcceptsWhatOpsSend(t *testing.T) {
 	ctx := context.Background()
 	_ = ops.SaveFlush(ctx)
 	_ = ops.Ping(ctx)
-	_ = ops.Rollback(ctx, "fuuty119", domain.MaxRollbackAge+5, "main")
-	_ = ops.Kick(ctx, "fuuty119", "ブロックを不自然な速さで変えたため")
-	_ = ops.Kick(ctx, "fuuty119", domain.CleanText("理由\nつき"+strings.Repeat("字", 200), MaxKickReason))
-	_, _ = con.Run(ctx, MuteCommand(muteTmpl, "fuuty119"))
+	_ = ops.Rollback(ctx, "testuser", domain.MaxRollbackAge+5, "main")
+	_ = ops.Kick(ctx, "testuser", "ブロックを不自然な速さで変えたため")
+	_ = ops.Kick(ctx, "testuser", domain.CleanText("理由\nつき"+strings.Repeat("字", 200), MaxKickReason))
+	_, _ = con.Run(ctx, MuteCommand(muteTmpl, "testuser"))
 	sent := con.Sent()
 	if len(sent) != 6 {
 		t.Fatalf("commands: %q", sent)
