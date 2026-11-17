@@ -2,6 +2,10 @@
 
 バージョンごとの変更。タグはバージョンと対応する。
 
+## v0.5.1
+
+- Go を 1.27.4 へ更新した (標準ライブラリ net/http の脆弱性 GO-2026-6859 の修正)。コードの変更は無い
+
 ## v0.5.0
 
 - コネクタの Discord のツールを、Admin 以上の認証では全て使えるようにした。既定の `CONNECTOR_DISCORD_ALLOW` は `^discord_[a-z0-9_]+$` (ロールの更新・チャンネルの変更と削除・BAN などを含む)。通報フォーラムだけに限っていたチャンネルの範囲と、`discord_update_channel` を `applied_tags` だけにしていた限定を外した。ロールの更新 (`discord_update_guild_role`) も項目を限らない
