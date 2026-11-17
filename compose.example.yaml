@@ -54,7 +54,6 @@
     security_opt:
       - no-new-privileges:true
     depends_on:
-      - tidb
       - discord-mcp
     # RCON_PASSWORD など、秘密はホスト側の env_file で渡す (このファイルには書かない)
     env_file:
@@ -65,9 +64,9 @@
       - CRIMEBUSTER_MODE=observe
       # 操作のためのコネクタ (:8090、内部のネットワークだけ。ports は付けない)。TORO-MCP が、利用者の OAuth のトークンをそのまま渡す。
       # コネクタが auth の /introspect に尋ね、いまの Discord のロールが Admin 以上 (ADMIN_ROLE_IDS) の人だけを通す。共有の秘密は無い
-      - AUTH_INTERNAL_URL=http://toro-auth:8081
+      - AUTH_INTERNAL_URL=http://auth.internal.example:8081
       - ADMIN_ROLE_IDS=
-      - DB_HOST=tidb
+      - DB_HOST=db.internal.example
       # CoreProtect を読むだけ。SELECT だけの専用のユーザーにする: GRANT SELECT ON coreprotect.* TO 'toro_guard'@'%'
       - DB_USER=toro_guard
       - DB_PASSWORD_FILE=/run/secrets/crime-buster-db
@@ -77,7 +76,7 @@
       - REPORT_CHANNEL_ID=
       - ROLLBACK_TAG_ID=
       # コンソールは RCON で直接送る (パスワードは env_file の RCON_PASSWORD)。接続先は Minecraft のサーバーの RCON のポート
-      - RCON_ADDR=toro-main:25575
+      - RCON_ADDR=mc.internal.example:25575
       # 撮影は TORO-Renderer の描画 API に頼む
       - RENDERER_URL=http://toro-renderer:8080
       - MAP_IDS=main=overworld
@@ -104,7 +103,7 @@
 
   # TORO-MCP (mcp.torosaba.net) が、crime-buster のコネクタに頼むために足す設定 (ServerImage の toro-mcp の environment に)。
   # 管理用のツールは、いまの Discord のロールが ADMIN_ROLE_IDS (環境変数で指定する。指定が無ければ、どのロールでも通さない) の人にだけ見える。
-  # 利用者のトークンをそのままコネクタに渡すので、秘密は増えない。toro-auth には DISCORD_BOT_TOKEN が要る (いまのロールを調べるため)。
+  # 利用者のトークンをそのままコネクタに渡すので、秘密は増えない。認証サービスには DISCORD_BOT_TOKEN が要る (いまのロールを調べるため)。
   #   - CRIMEBUSTER_CONNECTOR_URL=http://crime-buster:8090
   #   - ADMIN_ROLE_IDS=
 

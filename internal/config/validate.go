@@ -70,7 +70,11 @@ func (c *Config) Validate() error {
 	}
 	caps := CapabilitiesFor(c.Mode)
 
-	// DB: ポートは数値で範囲内 (DSN の組み立てで使う)。
+	// DB: ホストは既定値を持たないので必須 (未設定のまま、意図しない接続先に黙ってつながらないように)。
+	// ポートは数値で範囲内 (DSN の組み立てで使う)。
+	if strings.TrimSpace(c.DBConfig.DBHost) == "" {
+		add("DB_HOST is required")
+	}
 	if p, err := strconv.Atoi(c.DBConfig.DBPort); err != nil || p < 1 || p > 65535 {
 		add("DB_PORT must be a port number between 1 and 65535: %q", c.DBConfig.DBPort)
 	}
@@ -132,6 +136,9 @@ func (c *Config) Validate() error {
 			add("CONNECTOR_ADDR must be in host:port form: %q", c.ConnectorConfig.Addr)
 		} else if p, err := strconv.Atoi(port); err != nil || p < 1 || p > 65535 {
 			add("CONNECTOR_ADDR must have a port number between 1 and 65535: %q", c.ConnectorConfig.Addr)
+		}
+		if strings.TrimSpace(c.ConnectorConfig.AuthInternalURL) == "" {
+			add("AUTH_INTERNAL_URL is required when the connector is enabled (CONNECTOR_ADDR is set)")
 		}
 		if _, err := regexp.Compile(c.ConnectorConfig.DiscordAllow); err != nil {
 			add("CONNECTOR_DISCORD_ALLOW must be a valid regular expression: %v", err)
