@@ -635,6 +635,19 @@ func (c *Connector) discordCall(r *http.Request) (*result, error) {
 		return nil, err
 	}
 	auditAdd(r, "tool", domain.OneLine(in.Tool, 80))
+	if in.Reason != "" {
+		auditAdd(r, "reason", domain.OneLine(in.Reason, 200)) // 誰の頼みかは user に残る
+	}
+	// guild_id / role_id など、何に触ったか。呼ぶ側が決めた名前で user などの項目を上書きできないよう、入れ物に入れる
+	touched := map[string]string{}
+	for k, v := range in.PathParams {
+		if s, ok := v.(string); ok && pathParamRE.MatchString(k) {
+			touched[k] = domain.OneLine(s, 64)
+		}
+	}
+	if len(touched) > 0 {
+		auditAdd(r, "path_params", touched)
+	}
 	if !c.allow.MatchString(in.Tool) {
 		return nil, fmt.Errorf("%w: ツール %q は許可していません (許可: discord_tools で確かめてください)", domain.ErrForbidden, in.Tool)
 	}
@@ -650,7 +663,7 @@ func (c *Connector) discordCall(r *http.Request) (*result, error) {
 	if err := limitDiscordBody(in.Tool, in.Body); err != nil {
 		return nil, err
 	}
-	if err := c.checkDiscordCall(r.Context(), in.Tool, in.PathParams); err != nil {
+	if err := c.checkDiscordCall(in.PathParams); err != nil {
 		return nil, err
 	}
 	if b, err := json.Marshal(in.Body); err == nil && in.Body != nil {
@@ -671,67 +684,37 @@ func (c *Connector) discordCall(r *http.Request) (*result, error) {
 	return &result{body: map[string]any{"result": out}}, nil
 }
 
-var (
-	snowflakeRE = regexp.MustCompile(`^[0-9]{17,20}$`)
-	pathParamRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
-)
+var pathParamRE = regexp.MustCompile(`^[a-z_]{1,32}$`)
 
-// discordGuildTools は、チャンネルを指定しないツール。ほかのツールは、channel_id が要る。
-var discordGuildTools = map[string]bool{
-	"discord_get_my_user": true, "discord_list_guild_channels": true, "discord_list_guild_roles": true,
-	"discord_get_guild_member": true, "discord_search_guild_members": true, "discord_list_active_guild_threads": true,
-}
-
-// checkDiscordCall は、パスの値が ID の形か、チャンネルが通報フォーラムかそのスレッドかを確かめる。
-func (c *Connector) checkDiscordCall(ctx context.Context, tool string, params map[string]any) error {
+// checkDiscordCall は、パスの値の形だけを確かめる。呼べる人は Admin 以上に限られる (Authz) ので、
+// チャンネルや操作の種類は限らない。パスの値は Discord の API の URL に入るので、区切りや .. は通さない。
+func (c *Connector) checkDiscordCall(params map[string]any) error {
 	for k, v := range params {
-		id, ok := v.(string)
-		if !pathParamRE.MatchString(k) || !ok || !snowflakeRE.MatchString(id) {
-			return badRequest("pathParams の %q は Discord の ID にしてください", domain.OneLine(k, 32))
+		val, ok := v.(string)
+		if !pathParamRE.MatchString(k) || !ok || !pathValueOK(val) {
+			return badRequest("pathParams の %q の値が正しくありません (区切りや .. は使えません)", domain.OneLine(k, 32))
 		}
-	}
-	if discordGuildTools[tool] {
-		return nil
-	}
-	id, _ := params["channel_id"].(string)
-	if id == "" {
-		return badRequest("pathParams.channel_id が要ります")
-	}
-	rep := c.g.Reporter()
-	if id == rep.ChannelID() {
-		return nil
-	}
-	notAllowed := fmt.Errorf("%w: 通報フォーラムとそのスレッドのほかは、触れません", domain.ErrForbidden)
-	if tool == "discord_create_thread" {
-		return notAllowed
-	}
-	out, err := rep.MCP().Discord(ctx, notify.DiscordCall{Tool: "discord_get_channel", PathParams: map[string]any{"channel_id": id}, Fields: "id,parent_id", Auth: rep.Auth()})
-	if err != nil {
-		return notAllowed // Discord が見せないチャンネルは、確かめられないので断る
-	}
-	var ch struct {
-		ParentID string `json:"parent_id"`
-	}
-	if err := json.Unmarshal([]byte(out), &ch); err != nil || ch.ParentID != rep.ChannelID() {
-		return notAllowed
 	}
 	return nil
 }
 
+// pathValueOK は、パスの値として安全か。ID のほか、絵文字 (リアクション) や招待コードも入るので、形は広く取る。
+func pathValueOK(s string) bool {
+	if s == "" || len(s) > 200 || strings.Contains(s, "..") {
+		return false
+	}
+	for _, r := range s {
+		if r < 0x20 || r == 0x7f || strings.ContainsRune(`/\?#`, r) {
+			return false
+		}
+	}
+	return true
+}
+
 // limitDiscordBody は、本文の決まりを当てはめる。だれにも通知しない設定は、呼ぶ側に選ばせない。
-// update_channel は、タグだけを変えられる (名前や権限などは変えさせない)。
+// ほかの操作 (ロールの更新、チャンネルの変更など) は、項目を限らない。
 func limitDiscordBody(tool string, body map[string]any) error {
 	switch tool {
-	case "discord_update_channel":
-		tags, ok := body["applied_tags"].([]any)
-		if !ok || len(body) != 1 {
-			return fmt.Errorf("%w: update_channel で変えられるのは applied_tags だけです", domain.ErrForbidden)
-		}
-		for _, t := range tags {
-			if id, ok := t.(string); !ok || !snowflakeRE.MatchString(id) {
-				return badRequest("applied_tags は Discord の ID の配列にしてください")
-			}
-		}
 	case "discord_create_message":
 		if body == nil {
 			return badRequest("body が要ります")

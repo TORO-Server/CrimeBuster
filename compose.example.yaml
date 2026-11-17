@@ -36,9 +36,8 @@
       - DISCORD_MCP_ENABLE_GATEWAY=false
       - DISCORD_MCP_ALLOW_FILE_PATH=false
       - DISCORD_MCP_ALLOW_FILE_URL=false
-      # 通報に要る操作と、Muse など (Admin 以上) がコネクタ経由で使う読み取りだけ。BAN・キック・ロール・削除は含めない。
-      # crime-buster の CONNECTOR_DISCORD_ALLOW (コネクタの許可) も、同じ範囲にしてある (二重に絞る)
-      - DISCORD_MCP_INCLUDE_TOOLS=^discord_(call_tool|search_tools|get_my_user|get_channel|list_channel_messages|list_messages|get_message|get_channel_message|create_message|create_thread|update_channel|list_guild_channels|list_guild_roles|get_guild_member|search_guild_members|list_active_guild_threads|list_thread_members)$$
+      # Admin 以上 (コネクタの認証) が使う Discord のツールは全て許可する。DISCORD_MCP_INCLUDE_TOOLS は指定しない (全ツール)。
+      # 絞るときは、ここと crime-buster の CONNECTOR_DISCORD_ALLOW の両方で、同じ範囲にする
     networks:
       - minecraft-network
 
