@@ -8,8 +8,14 @@ import (
 	"testing"
 )
 
-func chatCfg() *config.Config {
-	c, _ := config.LoadConfig()
+func chatCfg(t *testing.T) *config.Config {
+	t.Helper()
+	t.Setenv("DB_HOST", "db.example.test")
+	t.Setenv("AUTH_INTERNAL_URL", "http://auth.example.test:8081")
+	c, err := config.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
 	return c
 }
 
@@ -24,7 +30,7 @@ func feedAll(d *ChatDetector, user int, t0 int64, step int64, msgs ...string) *C
 }
 
 func TestChatNormalTalkIsNotSpam(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	if tr := feedAll(d, 1, 1000, 6, "こんにちは", "今日は何する？", "建築しよう", "いいね", "ok", "ok", "了解"); tr != nil {
 		t.Fatalf("普通の会話を検知した: %v", tr)
 	}
@@ -32,14 +38,14 @@ func TestChatNormalTalkIsNotSpam(t *testing.T) {
 
 func TestChatCountdownIsNotFlood(t *testing.T) {
 	// 実際にあった、カウントダウン (8 件 / 10 秒) を誤検知しない
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	if tr := feedAll(d, 1, 1000, 1, "５", "4 (４)", "3 (３)", "2 (２)", "1 (１)", "0 (０)", "go (五)", "sex (背x)"); tr != nil {
 		t.Fatalf("カウントダウンを検知した: %v", tr)
 	}
 }
 
 func TestChatFlood(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	var msgs []string
 	for i := 0; i < 14; i++ {
 		msgs = append(msgs, strings.Repeat("x", 3)+string(rune('a'+i))+"hello"+string(rune('k'+i)))
@@ -51,7 +57,7 @@ func TestChatFlood(t *testing.T) {
 }
 
 func TestChatRepeatIgnoresDigitsAndSpaces(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	tr := feedAll(d, 1, 1000, 1, "買ってね 1", "買ってね 2", "買ってね  3", "買ってね4", "買ってね 5")
 	if tr == nil || tr.Kind != "repeat" {
 		t.Fatalf("数字だけ違う同じ発言を検知するはず: %v", tr)
@@ -59,7 +65,7 @@ func TestChatRepeatIgnoresDigitsAndSpaces(t *testing.T) {
 }
 
 func TestChatRepeatNeedsWindow(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	// 70 秒おきなら、同じ発言でも連投ではない
 	if tr := feedAll(d, 1, 1000, 70, "あ", "あ", "あ", "あ", "あ", "あ"); tr != nil {
 		t.Fatalf("間が空いた発言を検知した: %v", tr)
@@ -67,7 +73,7 @@ func TestChatRepeatNeedsWindow(t *testing.T) {
 }
 
 func TestChatRun(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	tr := d.Feed(ChatMsg{User: 1, Time: 1, Msg: strings.Repeat("a", 40)})
 	if tr == nil || tr.Kind != "run" {
 		t.Fatalf("同じ文字の連続を検知するはず: %v", tr)
@@ -78,11 +84,11 @@ func TestChatRun(t *testing.T) {
 }
 
 func TestChatInviteAndLinks(t *testing.T) {
-	d := NewChatDetector(chatCfg())
+	d := NewChatDetector(chatCfg(t))
 	if tr := feedAll(d, 1, 1000, 30, "遊ぼう discord.gg/abcd", "また discord.gg/abcd"); tr == nil || tr.Kind != "invite" {
 		t.Fatalf("招待リンクの繰り返し: %v", tr)
 	}
-	d = NewChatDetector(chatCfg())
+	d = NewChatDetector(chatCfg(t))
 	if tr := feedAll(d, 2, 1000, 20, "見て https://a.example/1", "これも https://b.example/2"); tr != nil {
 		t.Fatalf("リンクが 2 回だけなら普通: %v", tr)
 	}
@@ -96,13 +102,13 @@ func TestChatBadWordsFile(t *testing.T) {
 	if err := os.WriteFile(p, []byte("# 注釈\nbadword\n\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	c := chatCfg()
+	c := chatCfg(t)
 	c.ChatBadWordsFile = p
 	d := NewChatDetector(c)
 	if tr := d.Feed(ChatMsg{User: 1, Time: 1, Msg: "You BadWord!"}); tr == nil || tr.Kind != "badword" {
 		t.Fatalf("禁止語: %v", tr)
 	}
-	if tr := NewChatDetector(chatCfg()).Feed(ChatMsg{User: 1, Time: 1, Msg: "badword"}); tr != nil {
+	if tr := NewChatDetector(chatCfg(t)).Feed(ChatMsg{User: 1, Time: 1, Msg: "badword"}); tr != nil {
 		t.Fatalf("ファイルが無いときは、禁止語は使わない: %v", tr)
 	}
 }
