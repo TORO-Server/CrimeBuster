@@ -89,7 +89,7 @@ func TestIncidentID(t *testing.T) {
 		prefix, name string
 		safe         bool
 	}{
-		{"", "fuuty119", true},
+		{"", "testuser", true},
 		{"chat-", "a.b_c", true},
 		{"", "../../x", false},
 		{"", "a..b", false},
