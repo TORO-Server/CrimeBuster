@@ -2,6 +2,13 @@
 
 バージョンごとの変更。タグはバージョンと対応する。
 
+## v0.5.0
+
+- コネクタの Discord のツールを、Admin 以上の認証では全て使えるようにした。既定の `CONNECTOR_DISCORD_ALLOW` は `^discord_[a-z0-9_]+$` (ロールの更新・チャンネルの変更と削除・BAN などを含む)。通報フォーラムだけに限っていたチャンネルの範囲と、`discord_update_channel` を `applied_tags` だけにしていた限定を外した。ロールの更新 (`discord_update_guild_role`) も項目を限らない
+- Admin 未満は、従来どおりコネクタの全経路で 403 (Discord の経路にも届かない)。認可の判定と、投稿の `allowed_mentions` の固定は変えていない
+- `pathParams` の値は、ID の形に限らず、区切り (`/` `\` `?` `#`) と `..` を含まない文字列に改めた (絵文字や招待コードのパスのため)
+- 監査 (audit.jsonl) に、理由 (`reason`) と対象 (`path_params`) を足した。誰の頼みか (`user`) は従来どおり
+
 ## v0.4.0
 
 - 撮影を BlueMap のブラウザ撮影から TORO-Renderer の描画 API へ替えた。ブラウザ (Chromium、chromedp) は持たなくなった。印 (壊された列の線、範囲の枠、ラベル) は、Renderer が返すカメラの変換を使ってこちらで描く。地図の更新待ち (`bluemap update`) は無くなり、撮る前の `save-all flush` だけを残した

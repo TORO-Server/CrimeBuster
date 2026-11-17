@@ -332,7 +332,8 @@ func splitList(s string) []string {
 	return out
 }
 
-// DefaultDiscordAllow は、コネクタから呼べる Discord のツールの既定値。読むことと、投稿・タグ付けだけ。
-// BAN・キック・ロールの変更・チャンネルやメッセージの削除は含めない。
-// チャンネルを指定するツールは、さらに通報フォーラムとそのスレッドだけに限る。
-const DefaultDiscordAllow = `^discord_(get_my_user|get_channel|list_channel_messages|list_messages|get_message|get_channel_message|create_message|create_thread|update_channel|list_guild_channels|list_guild_roles|get_guild_member|search_guild_members|list_active_guild_threads|list_thread_members)$`
+// DefaultDiscordAllow は、コネクタから呼べる Discord のツールの既定値。
+// コネクタの全経路は Admin 以上 (ADMIN_ROLE_IDS) の認証が前提なので、Discord-MCP に定義のあるツールを全て許可する
+// (ロールの更新・削除・BAN を含む。操作は audit.jsonl と Discord の監査ログに、頼んだ人つきで残る)。
+// 絞りたいときは CONNECTOR_DISCORD_ALLOW に、許可するツール名の正規表現を指定する。
+const DefaultDiscordAllow = `^discord_[a-z0-9_]+$`
