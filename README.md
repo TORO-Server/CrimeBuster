@@ -1,12 +1,12 @@
 # CrimeBuster — 荒らしを見つけて、証拠の画像を付けて通報し、元に戻す (CoreProtect の用語ではロールバック)
 
-Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (TORO-Renderer が描く 3D の画面) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。コンテナの中身は、実行ファイルと通信用の証明書だけで、管理者権限では動かない。ブラウザも Docker のソケットも持たない (コンソールへは RCON で送る)。
+Minecraft サーバーの CoreProtect の記録を監視し、人の手では出せない速さでブロックを壊したり置いたりしている人を見つけたら、荒らされた場所の画像 (TORO-Renderer が描く 3D の画面) を撮り、その人のブロックの変更を CoreProtect でロールバックし、Discord のフォーラムに証拠の画像つきで報告するプログラム。言語は Go で、実行ファイルは 1 つ。コンテナの中身は、実行ファイルと通信用の証明書だけで、管理者権限では動かない。ブラウザも Docker のソケットも持たない (コンソールへは、サーバーを遠くから操作する仕組みの RCON で送る)。
 
-動かし方は 4 つ (モード) あり、検知して記録するだけの `observe` から、投稿とロールバックまで自動で行う `live` まで、段階を上げて使う。人か AI が確認してから決める運用では `review` を使い、事件は「確認待ち」になり、コネクタの HTTP API 経由で通報・ロールバック・却下を決める。
+動かし方は 4 つ (モード) あり、検知して記録するだけの `observe` から、投稿とロールバックまで自動で行う `live` まで、段階を上げて使う。人か AI が確認してから決める運用では `review` を使い、事件 (1 人のプレイヤーの一連の荒らしの疑いをまとめた記録) は「確認待ち」になり、コネクタ (人や AI が操作するための HTTP の仕組み) の HTTP API 経由で通報・ロールバック・却下を決める。
 
 ## クイックスタート
 
-1. `compose.example.yaml` のサービス定義を、自分の docker-compose.yaml に取り込む。データ用のディレクトリと、データベースのパスワードの secret を用意する。
+1. `compose.example.yaml` のサービス定義を、自分の docker-compose.yaml に取り込む。データ用のディレクトリと、データベースのパスワードの secret (秘密の値の置き場) を用意する。
 2. 環境変数 `CRIMEBUSTER_MODE=observe` で起動する。このモードは、検知して記録するだけで、外へは何もしない。
 3. `crime-buster check` で、データベースと Discord の接続を確かめる (何も投稿しない)。
 4. しばらく動かして検知の記録を見て、誤検知が無いことを確かめてから、`dry-run`、`review`、`live` の順に段階を上げる。
@@ -18,10 +18,10 @@ Minecraft サーバーの CoreProtect の記録を監視し、人の手では出
 | 文書 | 内容 |
 | --- | --- |
 | [docs/architecture.md](docs/architecture.md) | 構成要素と依存の方向、用語集、モードと能力、事件の状態と遷移 |
-| [docs/configuration.md](docs/configuration.md) | 設定リファレンス (環境変数)。コードの設定定義と CI で機械照合している |
+| [docs/configuration.md](docs/configuration.md) | 設定リファレンス (環境変数)。コードの設定定義と CI (変更のたびに自動で行う検査) で機械照合している |
 | [docs/detection.md](docs/detection.md) | 検知の仕様 (ブロック変更、チャット) |
 | [docs/connector-api.md](docs/connector-api.md) | コネクタの HTTP API の仕様 (経路、認証、認可、監査) と、コネクタ経由で操作する手順 |
-| [docs/reporting.md](docs/reporting.md) | 通報の仕様 (Discord への投稿、MCP 経由の投稿、AI 判定の位置付け) |
+| [docs/reporting.md](docs/reporting.md) | 通報の仕様 (Discord への投稿、MCP (AI が外部の道具を使うための取り決め) 経由の投稿、AI 判定の位置付け) |
 | [docs/operations.md](docs/operations.md) | 導入手順、データの保持期間、ヘルスチェック、限界 |
 | [docs/development.md](docs/development.md) | ビルド、テスト、過去の記録で見積もりを取るコマンド |
 | [CHANGELOG.md](CHANGELOG.md) | バージョンごとの変更 |
