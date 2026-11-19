@@ -62,7 +62,7 @@
       # observe → dry-run → review (人や Muse が見て決める) → live (自動でロールバックまで) の順に上げる
       - CRIMEBUSTER_MODE=observe
       # 操作のためのコネクタ (:8090、内部のネットワークだけ。ports は付けない)。TORO-MCP が、利用者の OAuth のトークンをそのまま渡す。
-      # コネクタが auth の /introspect に尋ね、いまの Discord のロールが Admin 以上 (ADMIN_ROLE_IDS) の人だけを通す。共有の秘密は無い
+      # コネクタが auth の /introspect に尋ね、いまの Discord のロールが Admin 以上 (ADMIN_ROLE_IDS) の人だけを通す。auth が INTROSPECT_SECRET を求めるときは、AUTH_INTROSPECT_SECRET に同じ値を渡す (秘密は env ファイルへ)
       - AUTH_INTERNAL_URL=http://auth.internal.example:8081
       - ADMIN_ROLE_IDS=
       - DB_HOST=db.internal.example

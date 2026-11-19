@@ -44,6 +44,7 @@ func principalOf(r *http.Request) *Principal {
 }
 
 type Authz struct {
+	secret      string // auth の INTROSPECT_SECRET (空なら付けない)
 	url         string
 	admins      map[string]bool
 	requireLive bool
@@ -55,7 +56,7 @@ func NewAuthz(cfg *config.Config) *Authz {
 	for _, r := range cfg.ConnectorConfig.AdminRoles {
 		admins[r] = true
 	}
-	return &Authz{url: cfg.ConnectorConfig.AuthInternalURL, admins: admins, requireLive: cfg.ConnectorConfig.RequireLiveRoles, http: &http.Client{Timeout: introspectTimeout}}
+	return &Authz{secret: cfg.ConnectorConfig.AuthIntrospectSecret, url: cfg.ConnectorConfig.AuthInternalURL, admins: admins, requireLive: cfg.ConnectorConfig.RequireLiveRoles, http: &http.Client{Timeout: introspectTimeout}}
 }
 
 type authResult int
@@ -78,6 +79,10 @@ func (a *Authz) Check(ctx context.Context, token string) (*Principal, authResult
 		return nil, authUnavailable, "auth への依頼を作れません"
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if a.secret != "" {
+		// auth が共有秘密を求めるとき (INTROSPECT_SECRET) の呼び出し側の証明
+		req.Header.Set("X-Toro-Token", a.secret)
+	}
 	res, err := a.http.Do(req)
 	if err != nil {
 		return nil, authUnavailable, "auth に尋ねられません"
