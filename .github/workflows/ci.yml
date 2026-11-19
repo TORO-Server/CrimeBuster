@@ -67,6 +67,23 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      # 発行済みのタグを上書きしない。バージョンのタグ (v*) とコミットのタグ (sha-) が GHCR に既にあれば失敗にする
+      # (latest と、メジャー.マイナーのタグは、動かす前提なので対象外。タグの実行は同じコミットの sha- を main の実行が先に置くため見ない。やり直しの実行でも sha- を見ない)
+      - name: 同名のタグが無いことを確かめる
+        if: github.event_name != 'pull_request'
+        run: |
+          check() {
+            if docker buildx imagetools inspect "$IMAGE:$1" > /dev/null 2>&1; then
+              echo "::error::$IMAGE:$1 は発行済みです。上書きしません。別のタグ名にしてください"
+              exit 1
+            fi
+          }
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            check "${GITHUB_REF_NAME#v}"
+          elif [ "$GITHUB_RUN_ATTEMPT" = 1 ]; then
+            check "sha-${GITHUB_SHA::7}"
+          fi
+
       - id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
