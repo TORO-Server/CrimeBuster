@@ -790,3 +790,22 @@ func TestConnectorScreenshotValidation(t *testing.T) {
 		t.Errorf("unknown job: %d, want 404", code)
 	}
 }
+
+// auth の共有秘密 (INTROSPECT_SECRET) は、設定したときだけ X-Toro-Token として付く。
+func TestAuthzSendsTheSharedSecretOnlyWhenConfigured(t *testing.T) {
+	var got []string
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = append(got, r.Header.Get("X-Toro-Token"))
+		_, _ = w.Write([]byte(`{"active":true,"claims":{"id":"1","roles":["` + adminRole + `"],"roles_source":"live"}}`))
+	}))
+	defer auth.Close()
+	for _, secret := range []string{"", "shared-secret-value"} {
+		a := NewAuthz(&config.Config{ConnectorConfig: config.ConnectorConfig{AuthInternalURL: auth.URL, AuthIntrospectSecret: secret, AdminRoles: []string{adminRole}, RequireLiveRoles: true}})
+		if p, res, _ := a.Check(context.Background(), "tok"); p == nil || res != authOK {
+			t.Fatalf("%v %v", p, res)
+		}
+	}
+	if len(got) != 2 || got[0] != "" || got[1] != "shared-secret-value" {
+		t.Fatalf("got %q", got)
+	}
+}
