@@ -20,6 +20,7 @@
 | --- | --- | --- |
 | `CONNECTOR_ADDR` | `:8090` | コネクタの待ち受けアドレス。空ならコネクタを開かない |
 | `AUTH_INTERNAL_URL` | (無し。環境変数で指定) | 認証サービスの introspection の接続先 (内部のネットワークだけ)。コネクタを開くとき (`CONNECTOR_ADDR` が空でないとき) は必須 |
+| `AUTH_INTROSPECT_SECRET` | (空。秘密) | 認証サービスの `INTROSPECT_SECRET` と同じ値。空でなければ、introspection の呼び出しに `X-Toro-Token` として付ける (認証サービスが共有の秘密を求めるとき)。env ファイルに置き、リポジトリには書かない |
 | `ADMIN_ROLE_IDS` | (無し。環境変数で指定) | コネクタを使える Discord のロールの ID (コンマ区切り)。指定が無ければ、どのロールでも通さない。操作を受けるモードでは必須 |
 | `CONNECTOR_REQUIRE_LIVE_ROLES` | `true` | 認可で、いまの Discord のロール (roles_source が live のもの) だけを信じるか。 |
 | `CONNECTOR_DISCORD_ALLOW` | `^discord_[a-z0-9_]+$` (全てのツール) | コネクタから呼んでよい Discord のツール名の正規表現 |
