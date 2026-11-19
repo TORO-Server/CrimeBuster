@@ -2,6 +2,10 @@
 
 バージョンごとの変更。タグはバージョンと対応する。
 
+## v0.5.2
+
+- auth の introspection (`/introspect`) に共有の秘密を付けられるようにした。`AUTH_INTROSPECT_SECRET` (auth の `INTROSPECT_SECRET` と同じ値) があれば `X-Toro-Token` で送る。無ければ従来どおり付けない
+
 ## v0.5.1
 
 - Go を 1.27.4 へ更新した (標準ライブラリ net/http の脆弱性 GO-2026-6859 の修正)。コードの変更は無い
