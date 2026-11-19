@@ -102,11 +102,12 @@ type ShotConfig struct {
 // 認証は OAuth 2.0 のトークン: auth の introspection (/introspect) に尋ね、いまの Discord のロールが AdminRoles のどれかであること。
 // Addr が空ならコネクタは開かない。
 type ConnectorConfig struct {
-	Addr             string
-	AuthInternalURL  string   // auth の introspection の接続先 (内部のネットワークだけ)
-	AdminRoles       []string // コネクタを使える Discord のロールの ID (Owner と Admin)
-	RequireLiveRoles bool     // true なら、auth がいまの Discord で確かめたロール (roles_source=live) だけを信じる
-	DiscordAllow     string   // コネクタから呼んでよい Discord のツール名の正規表現
+	Addr                 string
+	AuthInternalURL      string   // auth の introspection の接続先 (内部のネットワークだけ)
+	AuthIntrospectSecret string   // auth の INTROSPECT_SECRET と同じ値。空でなければ introspection の呼び出しに X-Toro-Token として付ける
+	AdminRoles           []string // コネクタを使える Discord のロールの ID (Owner と Admin)
+	RequireLiveRoles     bool     // true なら、auth がいまの Discord で確かめたロール (roles_source=live) だけを信じる
+	DiscordAllow         string   // コネクタから呼んでよい Discord のツール名の正規表現
 }
 
 // StorageConfig はファイルの保存先。
@@ -220,11 +221,12 @@ func LoadConfig() (*Config, error) {
 			ShotHeight:  envInt("SHOT_HEIGHT", 720),
 		},
 		ConnectorConfig: ConnectorConfig{
-			Addr:             envStr("CONNECTOR_ADDR", ":8090"),
-			AuthInternalURL:  strings.TrimRight(envStr("AUTH_INTERNAL_URL", ""), "/"),
-			AdminRoles:       splitList(envStr("ADMIN_ROLE_IDS", "")),
-			RequireLiveRoles: envBool("CONNECTOR_REQUIRE_LIVE_ROLES", true),
-			DiscordAllow:     envStr("CONNECTOR_DISCORD_ALLOW", DefaultDiscordAllow),
+			Addr:                 envStr("CONNECTOR_ADDR", ":8090"),
+			AuthInternalURL:      strings.TrimRight(envStr("AUTH_INTERNAL_URL", ""), "/"),
+			AuthIntrospectSecret: envStr("AUTH_INTROSPECT_SECRET", ""),
+			AdminRoles:           splitList(envStr("ADMIN_ROLE_IDS", "")),
+			RequireLiveRoles:     envBool("CONNECTOR_REQUIRE_LIVE_ROLES", true),
+			DiscordAllow:         envStr("CONNECTOR_DISCORD_ALLOW", DefaultDiscordAllow),
 		},
 		StorageConfig: StorageConfig{
 			WarpsDir: envStr("WARPS_DIR", ""),
