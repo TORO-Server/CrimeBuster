@@ -179,3 +179,29 @@ func TestShooterErrors(t *testing.T) {
 		t.Fatal("HTTP の失敗を成功とした")
 	}
 }
+
+// トークンを設定したときだけ X-Api-Token を付け、Renderer が 401 を返したら失敗にする。
+func TestShooterSendsToken(t *testing.T) {
+	const want = "unit-test-token"
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Header.Get("X-Api-Token"))
+		if r.Header.Get("X-Api-Token") != want {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"image": ""})
+	}))
+	defer srv.Close()
+	cam := Cam{Dist: 100}
+	out := filepath.Join(t.TempDir(), "s.png")
+	if err := (&Shooter{URL: srv.URL, W: 8, H: 8, Token: want, hc: &http.Client{}}).Shot(context.Background(), "w", cam, out, nil); err != nil {
+		t.Fatalf("トークン付きは通るはず: %v", err)
+	}
+	if err := (&Shooter{URL: srv.URL, W: 8, H: 8, hc: &http.Client{}}).Shot(context.Background(), "w", cam, out, nil); err == nil {
+		t.Fatal("トークン無しは 401 で失敗するはず")
+	}
+	if len(seen) != 2 || seen[0] != want || seen[1] != "" {
+		t.Fatalf("送出: %q", seen)
+	}
+}

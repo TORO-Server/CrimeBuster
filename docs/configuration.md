@@ -111,6 +111,7 @@
 | 名前 | 既定 | 意味 |
 | --- | --- | --- |
 | `RENDERER_URL` | (空) | Renderer の API の接続先 (例 `http://toro-renderer:8080`) |
+| `RENDERER_API_TOKEN` | (空) | Renderer の共有トークン。空でなければ要求に `X-Api-Token` で付ける。`RENDERER_API_TOKEN_FILE` でファイルから読むこともできる。値はホスト側で管理し、リポジトリには置かない |
 | `MAP_IDS` | `main=overworld` | ワールド名と Renderer のマップ名の対応 (コンマ区切り) |
 | `SHOT_WIDTH` | `1280` | 画像の幅 |
 | `SHOT_HEIGHT` | `720` | 画像の高さ |

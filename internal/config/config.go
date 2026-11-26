@@ -92,10 +92,11 @@ type ConsoleConfig struct {
 
 // ShotConfig は Renderer の画面の撮影。
 type ShotConfig struct {
-	RendererURL string            // Renderer の API の接続先。例: http://toro-renderer:8080
-	MapIDs      map[string]string // ワールド名 → Renderer のマップ名
-	ShotWidth   int
-	ShotHeight  int
+	RendererURL   string            // Renderer の API の接続先。例: http://toro-renderer:8080
+	RendererToken string            // Renderer の共有トークン (RENDERER_API_TOKEN または _FILE。ホスト側で管理し、リポジトリには置かない)。空なら送らない
+	MapIDs        map[string]string // ワールド名 → Renderer のマップ名
+	ShotWidth     int
+	ShotHeight    int
 }
 
 // ConnectorConfig は操作のためのコネクタ (TORO-MCP が、Admin 以上の人の頼みを、その人のトークンのまま取り次ぐ)。内部のネットワークだけに出す。
@@ -152,6 +153,10 @@ func LoadConfig() (*Config, error) {
 		return nil, err
 	}
 	rconPassword, err := envSecret("RCON_PASSWORD")
+	if err != nil {
+		return nil, err
+	}
+	rendererToken, err := envSecret("RENDERER_API_TOKEN")
 	if err != nil {
 		return nil, err
 	}
@@ -215,10 +220,11 @@ func LoadConfig() (*Config, error) {
 			KickEnabled:  envBool("KICK_ENABLED", false),
 		},
 		ShotConfig: ShotConfig{
-			RendererURL: envStr("RENDERER_URL", ""),
-			MapIDs:      parseMap(envStr("MAP_IDS", "main=overworld")),
-			ShotWidth:   envInt("SHOT_WIDTH", 1280),
-			ShotHeight:  envInt("SHOT_HEIGHT", 720),
+			RendererURL:   envStr("RENDERER_URL", ""),
+			RendererToken: rendererToken,
+			MapIDs:        parseMap(envStr("MAP_IDS", "main=overworld")),
+			ShotWidth:     envInt("SHOT_WIDTH", 1280),
+			ShotHeight:    envInt("SHOT_HEIGHT", 720),
 		},
 		ConnectorConfig: ConnectorConfig{
 			Addr:                 envStr("CONNECTOR_ADDR", ":8090"),

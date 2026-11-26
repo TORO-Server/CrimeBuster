@@ -200,8 +200,10 @@ func AnnotFor(s *detect.Stats, label, sub string, withPillars bool) *Annot {
 // 印は、Renderer が返したカメラの変換を使って、こちらで描く (overlay.go)。
 type Shooter struct {
 	URL string // Renderer の API の接続先 (例 http://toro-renderer:8080)
-	W   int
-	H   int
+	// Token は Renderer の共有トークン。空でなければ、要求に X-Api-Token で付ける (値はログにも出さない)。
+	Token string
+	W     int
+	H     int
 
 	hc *http.Client
 
@@ -210,8 +212,9 @@ type Shooter struct {
 
 func NewShooter(c *config.Config) *Shooter {
 	return &Shooter{
-		URL: strings.TrimRight(c.ShotConfig.RendererURL, "/"),
-		W:   c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight,
+		URL:   strings.TrimRight(c.ShotConfig.RendererURL, "/"),
+		Token: c.ShotConfig.RendererToken,
+		W:     c.ShotConfig.ShotWidth, H: c.ShotConfig.ShotHeight,
 		hc: &http.Client{Transport: &http.Transport{DisableKeepAlives: true}},
 	}
 }
@@ -255,6 +258,9 @@ func (s *Shooter) Shot(ctx context.Context, mapID string, cam Cam, out string, a
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if s.Token != "" {
+		req.Header.Set("X-Api-Token", s.Token)
+	}
 	resp, err := s.hc.Do(req)
 	if err != nil {
 		return fmt.Errorf("renderer: %w", err)
